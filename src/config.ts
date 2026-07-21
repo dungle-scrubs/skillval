@@ -1,13 +1,13 @@
+/** Resolves configuration and state paths, then loads validated configuration values. */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { Check as checkSchema, Errors as schemaErrors } from "typebox/value";
 import { parse as parseYaml } from "yaml";
-import { isRecord } from "./utils.js";
+import type { ConfigFile } from "./config-contract.js";
+import { configFileSchema } from "./config-contract.js";
 
-export interface SkillvalConfig {
-  readonly executor: "codex";
-  readonly roots: readonly string[];
-}
+export type SkillvalConfig = ConfigFile;
 
 export interface ConfigPathOptions {
   readonly cliPath?: string;
@@ -54,19 +54,16 @@ export function loadConfig(path: string, home = homedir()): SkillvalConfig {
     throw new ConfigError(`invalid YAML in ${path}: ${detail}`, "CONFIG_YAML_INVALID");
   }
 
-  if (!isRecord(parsed)) {
-    throw new ConfigError(`${path} must contain a YAML mapping`);
-  }
-  if (!Array.isArray(parsed.roots) || parsed.roots.some((root) => typeof root !== "string")) {
-    throw new ConfigError(`${path} roots must be an array of paths`);
-  }
-  if (parsed.executor !== "codex") {
-    throw new ConfigError(`${path} executor must be "codex"`);
+  if (!checkSchema(configFileSchema, parsed)) {
+    const [firstError] = schemaErrors(configFileSchema, parsed);
+    const location = firstError?.instancePath.replaceAll("/", ".").replace(/^\./, "");
+    const subject = location === undefined || location === "" ? path : `${path} ${location}`;
+    throw new ConfigError(`${subject} ${firstError?.message ?? "is invalid"}`);
   }
 
   return {
     executor: parsed.executor,
-    roots: parsed.roots.map((root) => expandRoot(String(root), home)),
+    roots: parsed.roots.map((root) => expandRoot(root, home)),
   };
 }
 

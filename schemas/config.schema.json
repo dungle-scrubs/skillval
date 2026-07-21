@@ -1,21 +1,23 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/dungle-scrubs/skillval/main/schemas/config.schema.json",
-  "title": "skillval configuration",
   "type": "object",
   "required": ["executor", "roots"],
   "properties": {
     "executor": {
-      "const": "codex",
-      "description": "Trial executor. Codex is the only supported executor today."
+      "enum": ["codex"],
+      "description": "Trial executor."
     },
     "roots": {
       "type": "array",
-      "description": "Directories whose immediate children are agent skill directories.",
       "items": {
         "type": "string",
-        "minLength": 1
-      }
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "description": "Directories whose immediate children are agent skill directories."
     }
-  }
+  },
+  "$id": "https://raw.githubusercontent.com/dungle-scrubs/skillval/main/schemas/config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "title": "skillval configuration"
 }

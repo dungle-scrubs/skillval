@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { armCacheKey } from "../src/cache.js";
-import type { EvalCase } from "../src/types.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ArmCacheIdentity } from "../src/cache.js";
+import { ArmCache } from "../src/cache.js";
+import type { ArmResult, EvalCase } from "../src/types.js";
 
+const directories: string[] = [];
 const evalCase: EvalCase = {
   arms: ["skill", "baseline"],
   assert: { must_match: ["as const"] },
@@ -11,24 +16,51 @@ const evalCase: EvalCase = {
   should_trigger: true,
   trials: 1,
 };
+const identity: ArmCacheIdentity = {
+  arm: "skill",
+  evalCase,
+  executor: { model: "model-a", name: "codex", version: "codex 1.0" },
+  skillHash: "skill-hash",
+};
+const result: ArmResult = {
+  arm: "skill",
+  cached: false,
+  pass: true,
+  trials: [],
+};
 
-describe("arm cache keys", () => {
-  it("is stable for identical inputs", () => {
-    const first = armCacheKey("skill-hash", evalCase, "skill", "codex 1.0", "model-a");
-    const second = armCacheKey("skill-hash", evalCase, "skill", "codex 1.0", "model-a");
+afterEach(() => {
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
 
-    expect(first).toBe(second);
-    expect(first).toBe("66f7cb0fbbc84ac1aea7376db29aad02fb416cd2f52a67f250d9f18ea2709614");
+describe("arm cache", () => {
+  it("stores and returns a cached arm through its domain Interface", () => {
+    const cache = createCache();
+
+    cache.store(identity, result);
+
+    expect(cache.lookup(identity)).toEqual({ ...result, cached: true });
   });
 
-  it("changes for each execution identity input", () => {
-    const original = armCacheKey("skill-hash", evalCase, "skill", "codex 1.0", "model-a");
+  it.each([
+    ["skill hash", { ...identity, skillHash: "other-hash" }],
+    ["case", { ...identity, evalCase: { ...evalCase, prompt: "Changed" } }],
+    ["arm", { ...identity, arm: "baseline" as const }],
+    ["executor name", { ...identity, executor: { ...identity.executor, name: "other" } }],
+    ["executor version", { ...identity, executor: { ...identity.executor, version: "codex 2.0" } }],
+    ["model", { ...identity, executor: { ...identity.executor, model: "model-b" } }],
+  ])("invalidates when %s changes", (_field, changedIdentity) => {
+    const cache = createCache();
+    cache.store(identity, result);
 
-    expect(armCacheKey("other-hash", evalCase, "skill", "codex 1.0", "model-a")).not.toBe(original);
-    expect(armCacheKey("skill-hash", evalCase, "baseline", "codex 1.0", "model-a")).not.toBe(
-      original,
-    );
-    expect(armCacheKey("skill-hash", evalCase, "skill", "codex 2.0", "model-a")).not.toBe(original);
-    expect(armCacheKey("skill-hash", evalCase, "skill", "codex 1.0", "model-b")).not.toBe(original);
+    expect(cache.lookup(changedIdentity)).toBeUndefined();
   });
 });
+
+function createCache(): ArmCache {
+  const directory = mkdtempSync(join(tmpdir(), "skillval-cache-test-"));
+  directories.push(directory);
+  return new ArmCache(directory);
+}

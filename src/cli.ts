@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
+/** Defines the command-line transport and renders runner and discovery results. */
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath } from "./config.js";
 import type { DiscoveredSkill } from "./discovery.js";
-import { discoverSkills } from "./discovery.js";
+import { discoverSkills, discoveryReport } from "./discovery.js";
 import { runEvaluation } from "./runner.js";
 
 interface GlobalOptions {
@@ -81,11 +82,14 @@ program
     const config = loadConfig(configPath);
     const discovery = discoverSkills(config.roots);
     if (options.json === true) {
-      console.log(JSON.stringify(discovery, null, 2));
+      console.log(JSON.stringify(discoveryReport(discovery), null, 2));
       return;
     }
 
     printSkillTable(discovery.skills);
+    for (const skill of discovery.skills) {
+      if (skill.status === "invalid") console.log(`invalid skill: ${skill.validationError}`);
+    }
     for (const root of discovery.missingRoots) console.log(`missing root: ${root}`);
   });
 

@@ -1,28 +1,7 @@
-export type Arm = "baseline" | "skill";
+/** Collects normalized trace and evaluation result shapes shared across runtime modules. */
+import type { Arm } from "./case-contract.js";
 
-export interface CaseAssert {
-  readonly graders?: readonly string[];
-  readonly must_match?: readonly string[];
-  readonly must_not_match?: readonly string[];
-}
-
-export interface EvalCase {
-  readonly arms?: readonly Arm[];
-  readonly assert?: CaseAssert;
-  readonly id: string;
-  readonly mode: "generation" | "trigger";
-  readonly prompt: string;
-  readonly rule?: string;
-  readonly should_trigger?: boolean;
-  readonly trials?: number;
-  readonly type?: "capability" | "preference";
-}
-
-export interface SkillEvals {
-  readonly cases: readonly EvalCase[];
-  readonly class: "capability" | "preference";
-  readonly skill: string;
-}
+export type { Arm, CaseAssert, EvalCase, SkillEvals } from "./case-contract.js";
 
 export interface Check {
   readonly detail: string;
@@ -37,7 +16,7 @@ export interface TrialResult {
 }
 
 export interface ArmResult {
-  readonly arm: string;
+  readonly arm: Arm;
   readonly cached: boolean;
   readonly pass: boolean;
   readonly trials: readonly TrialResult[];

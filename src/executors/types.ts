@@ -1,3 +1,4 @@
+/** Defines the provider-neutral seam between trial orchestration and executor adapters. */
 import type { Arm, EvalCase, Trace } from "../types.js";
 
 export interface ExecutorMetadata {
@@ -10,6 +11,7 @@ export interface TrialRequest {
   readonly arm: Arm;
   readonly evalCase: EvalCase;
   readonly home: string;
+  readonly skillDirectory: string;
   readonly skillName: string;
   readonly workspace: string;
 }

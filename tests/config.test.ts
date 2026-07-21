@@ -1,6 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { expandRoot, resolveConfigPath, resolveStateDirectory } from "../src/config.js";
+import { expandRoot, loadConfig, resolveConfigPath, resolveStateDirectory } from "../src/config.js";
 
 describe("configuration paths", () => {
   it("uses CLI, environment, XDG, then default precedence", () => {
@@ -38,5 +40,32 @@ describe("configuration paths", () => {
     expect(resolveStateDirectory({}, "/Users/example")).toBe(
       "/Users/example/.local/state/skillval",
     );
+  });
+
+  it("loads configuration through the executable schema contract", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-test-"));
+    const path = resolve(directory, "config.yml");
+    writeFileSync(path, "executor: codex\nroots: [~/skills]\n");
+
+    try {
+      expect(loadConfig(path, "/Users/example")).toEqual({
+        executor: "codex",
+        roots: ["/Users/example/skills"],
+      });
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects unknown configuration fields", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-test-"));
+    const path = resolve(directory, "config.yml");
+    writeFileSync(path, "executor: codex\nroots: []\nlegacy: true\n");
+
+    try {
+      expect(() => loadConfig(path)).toThrow(/additional properties/i);
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
   });
 });

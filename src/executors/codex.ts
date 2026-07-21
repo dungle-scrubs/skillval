@@ -1,5 +1,6 @@
+/** Implements Codex-specific skill seeding, process isolation, invocation, and trace parsing. */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
@@ -18,7 +19,10 @@ export class CodexExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
+    if (request.arm === "skill") seedSkill(request);
     const sandbox = request.evalCase.mode === "generation" ? "workspace-write" : "read-only";
+    // Baselines need the real Codex configuration for authentication and model selection, but an
+    // empty HOME prevents globally installed skills from influencing the comparison arm.
     const environment =
       request.arm === "baseline"
         ? {
@@ -53,6 +57,13 @@ export class CodexExecutor implements Executor {
 
     return parseCodexTrace(result.stdout, request.skillName);
   }
+}
+
+function seedSkill(request: TrialRequest): void {
+  // Skill installation paths are provider knowledge and intentionally stay inside this adapter.
+  const skillsRoot = join(request.workspace, ".agents/skills");
+  mkdirSync(skillsRoot, { recursive: true });
+  symlinkSync(request.skillDirectory, join(skillsRoot, request.skillName));
 }
 
 export function detectCodex(realHome = homedir()): ExecutorMetadata {

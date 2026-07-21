@@ -6,7 +6,7 @@ skill: standards-typescript
 class: preference
 cases:
   - id: enum-question
-    mode: trigger
+    mode: generation
     type: preference
     rule: enums-as-const
     should_trigger: true
@@ -33,7 +33,7 @@ describe("case-file parsing", () => {
     expect(parsed.cases[0]).toMatchObject({
       arms: ["skill", "baseline"],
       id: "enum-question",
-      mode: "trigger",
+      mode: "generation",
       rule: "enums-as-const",
       should_trigger: true,
       trials: 3,
@@ -91,5 +91,45 @@ cases:
 `;
 
     expect(() => parseCaseFile(source)).toThrow("trials must be an integer from 1 through 5");
+  });
+
+  it("rejects unsupported grader names instead of silently ignoring them", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: unknown
+    mode: generation
+    prompt: test
+    assert:
+      graders: [typescript]
+`;
+
+    expect(() => parseCaseFile(source)).toThrow(/graders.*allowed values/i);
+  });
+
+  it("rejects graders used with an unsupported case mode", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: wrong-mode
+    mode: trigger
+    prompt: test
+    assert:
+      graders: [tsc]
+`;
+
+    expect(() => parseCaseFile(source)).toThrow('grader "tsc" does not support trigger mode');
+  });
+
+  it("rejects whitespace-only identifiers consistently with the published schema", () => {
+    const source = `
+skill: " "
+class: capability
+cases: []
+`;
+
+    expect(() => parseCaseFile(source)).toThrow(/skill.*pattern/i);
   });
 });

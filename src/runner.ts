@@ -1,14 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+/** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { armCacheKey, cachedArm, storeArm } from "./cache.js";
-import { readCaseFile } from "./case-file.js";
+import { ArmCache } from "./cache.js";
 import type { SkillvalConfig } from "./config.js";
 import { resolveStateDirectory } from "./config.js";
 import type { DiscoveredSkill } from "./discovery.js";
 import { discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
-import type { Executor } from "./executors/types.js";
+import type { Executor, ExecutorMetadata } from "./executors/types.js";
 import { gradeTrial } from "./grade.js";
 import type { Arm, ArmResult, CaseResult, EvalCase, TrialResult } from "./types.js";
 import { sha256, skillContentHash } from "./utils.js";
@@ -28,8 +28,7 @@ export interface SkillReport {
 }
 
 export interface RunReport {
-  readonly codexVersion: string;
-  readonly model: string;
+  readonly executor: ExecutorMetadata;
   readonly runHash: string;
   readonly skills: Readonly<Record<string, SkillReport>>;
 }
@@ -42,20 +41,20 @@ export interface RunOutcome {
 }
 
 interface ArmContext {
+  readonly cache: ArmCache;
   readonly evalCase: EvalCase;
   readonly executor: Executor;
   readonly skill: DiscoveredSkill;
   readonly skillHash: string;
-  readonly stateDirectory: string;
   readonly useCache: boolean;
 }
 
 interface CaseContext {
+  readonly cache: ArmCache;
   readonly executor: Executor;
   readonly skill: DiscoveredSkill;
   readonly skillHash: string;
   readonly skipBaseline: boolean;
-  readonly stateDirectory: string;
   readonly useCache: boolean;
 }
 
@@ -66,8 +65,9 @@ export function runEvaluation(
 ): RunOutcome {
   const discovery = discoverSkills(config.roots);
   const selectedSkills = selectSkills(discovery, options.requestedSkills);
-  const executor = createExecutor(config);
+  const executor = createExecutor(config.executor);
   const stateDirectory = resolveStateDirectory();
+  const cache = new ArmCache(stateDirectory);
   const skillInputs = selectedSkills.map((skill) => ({
     contentHash: skillContentHash(skill.skillDirectory),
     skill,
@@ -80,23 +80,18 @@ export function runEvaluation(
   let noops = 0;
 
   for (const { contentHash, skill } of skillInputs) {
-    if (!skill.hasSkillval) {
-      log(`${skill.name}: no skillval.yml, skipping`);
-      continue;
-    }
-    const caseFilePath = join(skill.skillDirectory, "skillval.yml");
-    const evals = readCaseFile(caseFilePath, skill.name);
+    const evals = skill.evals;
     log(`${skill.name} (${evals.class}, ${contentHash.slice(0, 12)}):`);
     const cases = evals.cases
       .filter((evalCase) => options.caseFilter === undefined || evalCase.id === options.caseFilter)
       .map((evalCase) =>
         runCase(
           {
+            cache,
             executor,
             skill,
             skillHash: contentHash,
             skipBaseline: options.skipBaseline,
-            stateDirectory,
             useCache: options.useCache,
           },
           evalCase,
@@ -109,8 +104,7 @@ export function runEvaluation(
   }
 
   const report: RunReport = {
-    codexVersion: executor.metadata.version,
-    model: executor.metadata.model,
+    executor: executor.metadata,
     runHash,
     skills: skillReports,
   };
@@ -144,11 +138,11 @@ function runCase(
     log(`  ${evalCase.id} [${arm}] ...`);
     const result = runArm(
       {
+        cache: context.cache,
         evalCase,
         executor: context.executor,
         skill: context.skill,
         skillHash: context.skillHash,
-        stateDirectory: context.stateDirectory,
         useCache: context.useCache,
       },
       arm,
@@ -170,15 +164,14 @@ function runCase(
 }
 
 function runArm(context: ArmContext, arm: Arm): ArmResult {
-  const key = armCacheKey(
-    context.skillHash,
-    context.evalCase,
+  const identity = {
     arm,
-    context.executor.metadata.version,
-    context.executor.metadata.model,
-  );
+    evalCase: context.evalCase,
+    executor: context.executor.metadata,
+    skillHash: context.skillHash,
+  };
   if (context.useCache) {
-    const hit = cachedArm(key, context.stateDirectory);
+    const hit = context.cache.lookup(identity);
     if (hit !== undefined) return hit;
   }
 
@@ -187,6 +180,7 @@ function runArm(context: ArmContext, arm: Arm): ArmResult {
   for (let index = 0; index < wanted; index += 1) {
     trials.push(runTrial(context, arm));
   }
+  // A disagreement makes the configured sample inconclusive, so collect the full five trials.
   while (shouldEscalate(trials)) trials.push(runTrial(context, arm));
 
   const result: ArmResult = {
@@ -195,24 +189,21 @@ function runArm(context: ArmContext, arm: Arm): ArmResult {
     pass: hasMajority(trials),
     trials,
   };
-  storeArm(key, result, context.stateDirectory);
+  context.cache.store(identity, result);
   return result;
 }
 
 function runTrial(context: ArmContext, arm: Arm): TrialResult {
+  // The runner owns generic resource lifecycle; adapters own provider-specific setup inside it.
   const workspace = mkdtempSync(join(tmpdir(), `skillval-${context.evalCase.id}-`));
   const trialHome = mkdtempSync(join(tmpdir(), "skillval-home-"));
-  if (arm === "skill") {
-    const skillsRoot = join(workspace, ".agents/skills");
-    mkdirSync(skillsRoot, { recursive: true });
-    symlinkSync(context.skill.skillDirectory, join(skillsRoot, context.skill.name));
-  }
 
   try {
     const trace = context.executor.runTrial({
       arm,
       evalCase: context.evalCase,
       home: trialHome,
+      skillDirectory: context.skill.skillDirectory,
       skillName: context.skill.name,
       workspace,
     });
@@ -230,6 +221,8 @@ function runTrial(context: ArmContext, arm: Arm): TrialResult {
       usage: undefined,
     };
   } finally {
+    // Trials may contain generated source or credentials-related environment state. Always clean
+    // both directories, including executor and grader failure paths.
     rmSync(workspace, { force: true, recursive: true });
     rmSync(trialHome, { force: true, recursive: true });
   }
