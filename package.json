@@ -1,0 +1,49 @@
+{
+  "name": "@dungle-scrubs/skillval",
+  "version": "0.1.0",
+  "description": "Deterministic evaluation for agent skills",
+  "type": "module",
+  "bin": {
+    "skillval": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/cli.ts --clean --format esm --platform node --sourcemap --target node22",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "prepare": "pnpm build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dungle-scrubs/skillval.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dungle-scrubs/skillval/issues"
+  },
+  "homepage": "https://github.com/dungle-scrubs/skillval#readme",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "dependencies": {
+    "@types/node": "^26.0.1",
+    "commander": "^15.0.0",
+    "typescript": "^6.0.3",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.6",
+    "lefthook": "^2.1.10",
+    "tsup": "^8.5.0",
+    "vitest": "^4.1.9"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/dungle-scrubs/skillval/main/schemas/skillval.schema.json",
+  "title": "skillval case file",
+  "type": "object",
+  "required": ["cases", "class", "skill"],
+  "properties": {
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/case" }
+    },
+    "class": {
+      "enum": ["preference", "capability"]
+    },
+    "skill": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "assert": {
+      "type": "object",
+      "properties": {
+        "graders": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "must_match": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "must_not_match": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "required": ["id", "mode", "prompt"],
+      "properties": {
+        "arms": {
+          "type": "array",
+          "items": { "enum": ["skill", "baseline"] }
+        },
+        "assert": { "$ref": "#/$defs/assert" },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": ["trigger", "generation"]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule": { "type": "string" },
+        "should_trigger": { "type": "boolean" },
+        "trials": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "type": {
+          "enum": ["preference", "capability"]
+        }
+      }
+    }
+  }
+}
