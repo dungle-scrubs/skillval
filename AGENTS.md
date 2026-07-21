@@ -54,7 +54,7 @@ agent guidance.
 ## Verification
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test && pnpm build
+pnpm typecheck && pnpm lint && pnpm schema:check && pnpm test && pnpm build
 ```
 
 End-to-end runs spawn the `codex` CLI and cost real trials - smoke with a

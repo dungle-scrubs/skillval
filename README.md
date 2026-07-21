@@ -91,17 +91,21 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 
 - `cache/` stores arm results.
 - `reports/` stores run reports named by a hash of the participating skills and their content
-  hashes. Each report also includes every participating skill's content hash.
+  hashes. Each report also includes every participating skill's content hash and the executor's
+  name, version, and model identity.
 
-`skillval list` returns the skill name, configured root, class, case count, and whether
-`skillval.yml` exists. Discovery only requires `SKILL.md`; evaluation additionally requires
-`skillval.yml`.
+`skillval list` returns the skill name, configured root, class, case count, whether `skillval.yml`
+exists, and a `missing`, `invalid`, or `ready` status in JSON output. Invalid case files include a
+validation error. Discovery only requires `SKILL.md`; evaluation requires a valid `skillval.yml`.
 
 ## Case files
 
 Only a file named `skillval.yml` next to `SKILL.md` is recognized. There is no `evals.yml`
 fallback. The complete format is described by the
 [case-file JSON Schema](schemas/skillval.schema.json).
+The published configuration and case-file schemas are generated from the same executable TypeBox
+contracts used for runtime validation. Contributors can regenerate them with `pnpm schema` and
+check freshness with `pnpm schema:check`.
 
 Top-level fields:
 
@@ -121,7 +125,8 @@ Case fields:
 - `prompt`: the complete trial prompt.
 - `assert.must_match`: JavaScript regular expressions that must match, with the `m` flag.
 - `assert.must_not_match`: JavaScript regular expressions that must not match, with the `m` flag.
-- `assert.graders`: deterministic graders. `tsc` is currently supported for generation cases.
+- `assert.graders`: deterministic graders. `tsc` is supported for generation cases. Unknown
+  graders and graders used with an unsupported mode are validation errors.
 - `trials`: an integer from 1 through 5. Results use a strict majority. If configured trials
   disagree, the arm escalates to 5 trials.
 
@@ -132,9 +137,10 @@ TypeScript configuration, then runs the TypeScript installation shipped with `sk
 
 ## Executors
 
-Executors are adapters with two responsibilities: report stable metadata for cache keys and run
-one trial request to return a normalized `Trace`. The runner owns temporary workspaces, skill
-seeding, grading, caching, majority voting, and reports. `codex` is the only adapter today.
+Executors are adapters with three responsibilities: report stable metadata for cache keys, prepare
+provider-specific skill and environment state, and run one trial request to return a normalized
+`Trace`. The runner owns temporary workspace lifecycle, grading, caching, majority voting, and
+reports. `codex` is the only adapter today.
 
 The Codex adapter runs:
 
@@ -143,16 +149,17 @@ codex exec --json --skip-git-repo-check --ephemeral -s <sandbox> -C <workspace> 
 ```
 
 Trigger cases use a read-only sandbox. Generation cases use `workspace-write`. Codex has no
-dedicated skill-invocation event, so invocation is detected when a `command_execution` command
-contains `<skill>/SKILL.md`. The skill arm always receives a workspace-local
+dedicated skill-invocation event, so its adapter detects invocation when a `command_execution`
+command contains `<skill>/SKILL.md`. The adapter also gives the skill arm a workspace-local
 `.agents/skills/<name>` symlink to the evaluated skill.
 
 Baseline arms are not seeded. Their `HOME` points to an empty temporary directory so globally
 installed skills are invisible, while `CODEX_HOME` still points to the user's real `~/.codex` for
 authentication and model configuration. A Claude executor is planned.
 
-Cached arm results are keyed by runner version, skill content hash, serialized case, arm, Codex
-version, and configured Codex model. A trial has a 15-minute timeout and a 64 MB output buffer.
+Cached arm results are keyed by runner version, skill content hash, serialized case, arm, executor
+name, executor version, and configured model. A trial has a 15-minute timeout and a 64 MB output
+buffer.
 
 ## Roadmap
 
