@@ -4,8 +4,9 @@ Thanks for contributing to skillval.
 
 ## Setup
 
-Requires Node.js >= 22 and pnpm (pinned via `packageManager`, so
-`corepack enable` is enough).
+Requires Node.js >= 22 and pnpm 10 (pinned via `packageManager`). On
+Node 22 or 24, `corepack enable` is enough; Node 25+ no longer ships
+Corepack, so install pnpm directly (`npm install -g pnpm@10`).
 
 ```bash
 pnpm install
