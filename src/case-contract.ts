@@ -10,6 +10,26 @@ const stringArraySchema = Type.Readonly(Type.Array(Type.String()));
 export const armSchema = Type.Enum(["baseline", "skill"]);
 
 // These schemas are executable at runtime and are also serialized into schemas/ for editor tooling.
+export const fixtureSchema = Type.ReadonlyObject(
+  Type.Object({
+    path: Type.Optional(
+      Type.String({
+        description: "Directory relative to skillval.yml, copied into the workspace.",
+        minLength: 1,
+        pattern: String.raw`\S`,
+      }),
+    ),
+    setup: Type.Optional(
+      Type.Readonly(
+        Type.Array(nonEmptyStringSchema, {
+          description: "Shell commands run sequentially inside the workspace after the copy.",
+        }),
+      ),
+    ),
+  }),
+  { additionalProperties: false, minProperties: 1 },
+);
+
 export const caseAssertSchema = Type.ReadonlyObject(
   Type.Object({
     graders: Type.Optional(
@@ -31,6 +51,7 @@ export const evalCaseSchema = Type.ReadonlyObject(
       ),
     ),
     assert: Type.Optional(caseAssertSchema),
+    fixture: Type.Optional(fixtureSchema),
     id: nonEmptyStringSchema,
     mode: Type.Enum(["generation", "trigger"]),
     prompt: nonEmptyStringSchema,
@@ -46,6 +67,7 @@ export const skillEvalsSchema = Type.ReadonlyObject(
   Type.Object({
     cases: Type.Readonly(Type.Array(evalCaseSchema)),
     class: classificationSchema,
+    fixture: Type.Optional(fixtureSchema),
     skill: nonEmptyStringSchema,
   }),
   {
@@ -59,6 +81,7 @@ export const skillEvalsSchema = Type.ReadonlyObject(
 export type Arm = Static<typeof armSchema>;
 export type CaseAssert = Static<typeof caseAssertSchema>;
 export type EvalCase = Static<typeof evalCaseSchema>;
+export type Fixture = Static<typeof fixtureSchema>;
 export type SkillEvals = Static<typeof skillEvalsSchema>;
 
 export class CaseContractError extends Error {

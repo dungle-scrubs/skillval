@@ -1,7 +1,7 @@
 /** Collects normalized trace and evaluation result shapes shared across runtime modules. */
 import type { Arm } from "./case-contract.js";
 
-export type { Arm, CaseAssert, EvalCase, SkillEvals } from "./case-contract.js";
+export type { Arm, CaseAssert, EvalCase, Fixture, SkillEvals } from "./case-contract.js";
 
 export interface Check {
   readonly detail: string;
@@ -9,8 +9,17 @@ export interface Check {
   readonly pass: boolean;
 }
 
+export interface FixtureCommandResult {
+  readonly command: string;
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly stderr: string;
+  readonly stdout: string;
+}
+
 export interface TrialResult {
   readonly checks: readonly Check[];
+  readonly fixtureSetup?: readonly FixtureCommandResult[];
   readonly pass: boolean;
   readonly usage: unknown;
 }

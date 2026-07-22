@@ -112,6 +112,8 @@ Top-level fields:
 - `skill`: the directory and skill name.
 - `class`: `preference` or `capability`.
 - `cases`: an array of deterministic evaluation cases.
+- `fixture`: optional suite-wide workspace fixture applied to every case that does not declare
+  its own. See [Fixtures](#fixtures).
 
 Case fields:
 
@@ -129,11 +131,66 @@ Case fields:
   graders and graders used with an unsupported mode are validation errors.
 - `trials`: an integer from 1 through 5. Results use a strict majority. If configured trials
   disagree, the arm escalates to 5 trials.
+- `fixture`: optional workspace fixture for this case. It replaces the suite-level `fixture`
+  entirely; `path` and `setup` never merge across levels.
 
 Every trial must also contain a complete executor trace. For generation cases, regex assertions
 see only produced files, prefixed with `=== filename ===`; prose cannot satisfy a file assertion.
 The `tsc` grader injects a module package file when needed and a strict bundler-resolution
 TypeScript configuration, then runs the TypeScript installation shipped with `skillval`.
+
+## Fixtures
+
+By default every trial starts in an empty temporary workspace. A fixture populates that workspace
+before the trial runs, for cases that need a realistic repository or document tree. A fixture has
+two fields, and at least one is required:
+
+- `path`: a directory relative to `skillval.yml`, copied recursively into the workspace before
+  the trial. `.git` and `node_modules` directories are never copied. The path must exist and be a
+  directory, and it may not contain symbolic links (create links with `setup` commands instead);
+  anything else is a validation error at load time.
+- `setup`: shell commands run sequentially inside the workspace after the copy, with a minimal
+  environment (`PATH` plus a throwaway `HOME`). A non-zero exit fails the trial with a
+  `fixture-setup` error before the agent runs; it is never a grading failure. Each command's
+  stdout and stderr are captured into the trial record.
+
+A suite-level `fixture` applies to every case; a case-level `fixture` replaces it entirely.
+Fixture directory contents and setup commands are part of the arm cache identity, so editing a
+fixture file or a setup command invalidates cached results for the cases that use it.
+
+Generation-mode regex assertions read every workspace file except `.git` and `node_modules`
+contents and the injected `package.json`/`tsconfig.json`, so fixture files are graded alongside
+anything the agent produced. Graders access the workspace directly (`tsc` compiles what it finds
+there). Write `must_match` patterns against the state you expect after the agent acts, not only
+against new files.
+
+Nested `.git` directories inside a fixture are not supported. Express git state with `setup`
+commands instead - this example stages a merge conflict for the agent to resolve:
+
+```yaml
+skill: resolve-conflicts
+class: capability
+cases:
+  - id: merge-conflict
+    mode: generation
+    prompt: Resolve the merge conflict in notes.md, keeping both sections.
+    assert:
+      must_not_match: ["^<{7} ", "^={7}$", "^>{7} "]
+    fixture:
+      path: fixtures/notes-repo
+      setup:
+        - git init -q -b main
+        - git config user.name fixture && git config user.email fixture@skillval.invalid
+        - git add -A && git commit -qm base
+        - git switch -qc feature
+        - printf 'feature section\n' >> notes.md && git commit -qam feature
+        - git switch -q main
+        - printf 'main section\n' >> notes.md && git commit -qam main
+        - git merge feature || true
+```
+
+The final `|| true` matters: `git merge` exits non-zero on conflict, which would otherwise fail
+the trial as a fixture-setup error - here the conflict is the point.
 
 ## Executors
 
@@ -168,14 +225,16 @@ buffer.
 - Run multiple models and emit per-model reports. A passing binding or trigger result on a weaker
   tier is a conservative bound for stronger tiers. Baseline no-op results remain model-specific,
   and a rule is a prune candidate only when every model in normal use passes at baseline.
-- Add workspace fixtures for audit-style skills that need realistic repositories or document
-  trees.
 - Add contested-boundary cases with `expect_invoked` and `expect_not_invoked` outcomes.
 - Include the discovered skill-listing hash in trigger-case invalidation so description changes in
   neighboring skills invalidate affected results.
 - Add cheap trigger simulations for broad description coverage before expensive executor trials.
 - Add a `lint` subcommand for Agent Skills format, references, case coverage, and regular
   expressions.
+- Evaluate agent instruction files (`CLAUDE.md`, `AGENTS.md`) with the same arm comparison, so
+  instruction rules can be proven load-bearing or flagged as no-ops the way skill rules are. The
+  shape is undecided: likely instructions-present vs instructions-absent arms over cases derived
+  from the file's rules.
 - Harvest missed triggers, false invocations, and behavioral regressions from real session
   transcripts as new cases.
 - Support multi-model interpretation and no-op pruning in report summaries, not only raw reports.

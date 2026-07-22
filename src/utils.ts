@@ -6,13 +6,15 @@ export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+// Directories that never contribute to content identity or workspace materialization.
+export const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set([".git", "node_modules"]);
+
 export function walkFiles(root: string): string[] {
   const files: string[] = [];
-  const skippedDirectories = new Set([".git", "node_modules"]);
 
   function visit(directory: string): void {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (skippedDirectories.has(entry.name)) continue;
+      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
       const path = join(directory, entry.name);
       if (entry.isDirectory()) visit(path);
       else if (entry.isFile()) files.push(path);
