@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { CaseFileError, parseCaseFile } from "../src/case-file.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { CaseFileError, parseCaseFile, readCaseFile } from "../src/case-file.js";
 
 const validCaseFile = `
 skill: standards-typescript
@@ -132,4 +135,111 @@ cases: []
 
     expect(() => parseCaseFile(source)).toThrow(/skill.*pattern/i);
   });
+
+  it("parses suite-level and per-case fixtures", () => {
+    const source = `
+skill: fixtures
+class: capability
+fixture:
+  path: fixtures/base
+cases:
+  - id: default
+    mode: generation
+    prompt: use the suite fixture
+  - id: override
+    mode: generation
+    prompt: use my own fixture
+    fixture:
+      setup: ["git init -q"]
+`;
+
+    const parsed = parseCaseFile(source);
+
+    expect(parsed.fixture).toEqual({ path: "fixtures/base" });
+    expect(parsed.cases[0]?.fixture).toBeUndefined();
+    expect(parsed.cases[1]?.fixture).toEqual({ setup: ["git init -q"] });
+  });
+
+  it("rejects a fixture with neither path nor setup", () => {
+    const source = `
+skill: fixtures
+class: capability
+cases:
+  - id: empty-fixture
+    mode: generation
+    prompt: test
+    fixture: {}
+`;
+
+    expect(() => parseCaseFile(source)).toThrow(CaseFileError);
+    expect(() => parseCaseFile(source)).toThrow(/fixture/);
+  });
+});
+
+describe("fixture path validation", () => {
+  const directories: string[] = [];
+
+  afterEach(() => {
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a case fixture path that does not exist, naming the case id", () => {
+    const path = writeSuite(`
+skill: fixtures
+class: capability
+cases:
+  - id: missing-fixture
+    mode: generation
+    prompt: test
+    fixture:
+      path: fixtures/absent
+`);
+
+    expect(() => readCaseFile(path)).toThrow(
+      'case "missing-fixture" fixture path "fixtures/absent" does not exist',
+    );
+  });
+
+  it("rejects a fixture path that is a file, not a directory", () => {
+    const path = writeSuite(`
+skill: fixtures
+class: capability
+fixture:
+  path: fixtures/plain.txt
+cases: []
+`);
+    const skillDirectory = join(path, "..");
+    mkdirSync(join(skillDirectory, "fixtures"));
+    writeFileSync(join(skillDirectory, "fixtures", "plain.txt"), "not a directory");
+
+    expect(() => readCaseFile(path)).toThrow(
+      'suite fixture path "fixtures/plain.txt" is not a directory',
+    );
+  });
+
+  it("accepts a fixture path that exists as a directory", () => {
+    const path = writeSuite(`
+skill: fixtures
+class: capability
+cases:
+  - id: present
+    mode: generation
+    prompt: test
+    fixture:
+      path: fixtures/repo
+`);
+    mkdirSync(join(path, "..", "fixtures", "repo"), { recursive: true });
+
+    expect(readCaseFile(path).cases[0]?.fixture).toEqual({ path: "fixtures/repo" });
+  });
+
+  function writeSuite(source: string): string {
+    const skillDirectory = mkdtempSync(join(tmpdir(), "skillval-case-file-test-"));
+    directories.push(skillDirectory);
+    const path = join(skillDirectory, "skillval.yml");
+    writeFileSync(path, source);
+    return path;
+  }
 });

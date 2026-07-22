@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ArmCacheIdentity } from "../src/cache.js";
 import { ArmCache } from "../src/cache.js";
+import { resolveFixture } from "../src/fixture.js";
 import type { ArmResult, EvalCase } from "../src/types.js";
 
 const directories: string[] = [];
@@ -51,11 +52,28 @@ describe("arm cache", () => {
     ["executor name", { ...identity, executor: { ...identity.executor, name: "other" } }],
     ["executor version", { ...identity, executor: { ...identity.executor, version: "codex 2.0" } }],
     ["model", { ...identity, executor: { ...identity.executor, model: "model-b" } }],
+    ["fixture hash", { ...identity, fixtureHash: "fixture-hash" }],
   ])("invalidates when %s changes", (_field, changedIdentity) => {
     const cache = createCache();
     cache.store(identity, result);
 
     expect(cache.lookup(changedIdentity)).toBeUndefined();
+  });
+
+  it("invalidates a fixture-backed arm when one fixture file byte changes", () => {
+    const cache = createCache();
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "skillval-cache-fixture-"));
+    directories.push(fixtureDirectory);
+    writeFileSync(join(fixtureDirectory, "notes.md"), "aaa");
+    const fixture = { path: "." };
+    const before = resolveFixture(fixture, fixtureDirectory);
+    cache.store({ ...identity, fixtureHash: before?.hash }, result);
+
+    writeFileSync(join(fixtureDirectory, "notes.md"), "aab");
+    const after = resolveFixture(fixture, fixtureDirectory);
+
+    expect(cache.lookup({ ...identity, fixtureHash: before?.hash })).toBeDefined();
+    expect(cache.lookup({ ...identity, fixtureHash: after?.hash })).toBeUndefined();
   });
 });
 

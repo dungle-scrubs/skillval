@@ -13,6 +13,7 @@ export interface ArmCacheIdentity {
   readonly arm: Arm;
   readonly evalCase: EvalCase;
   readonly executor: ExecutorMetadata;
+  readonly fixtureHash?: string;
   readonly skillHash: string;
 }
 
@@ -37,17 +38,18 @@ export class ArmCache {
 
   #path(identity: ArmCacheIdentity): string {
     // Every input that can change an arm result belongs in this identity.
-    const key = sha256(
-      [
-        String(RUNNER_VERSION),
-        identity.skillHash,
-        JSON.stringify(identity.evalCase),
-        identity.arm,
-        identity.executor.name,
-        identity.executor.version,
-        identity.executor.model,
-      ].join("\0"),
-    );
+    const parts = [
+      String(RUNNER_VERSION),
+      identity.skillHash,
+      JSON.stringify(identity.evalCase),
+      identity.arm,
+      identity.executor.name,
+      identity.executor.version,
+      identity.executor.model,
+    ];
+    // Appended conditionally so fixture-free identities keep their historical keys.
+    if (identity.fixtureHash !== undefined) parts.push(identity.fixtureHash);
+    const key = sha256(parts.join("\0"));
     return join(this.#stateDirectory, "cache", `${key}.json`);
   }
 }

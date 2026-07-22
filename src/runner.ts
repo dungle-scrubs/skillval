@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { ArmCache } from "./cache.js";
 import type { SkillvalConfig } from "./config.js";
 import { resolveStateDirectory } from "./config.js";
-import type { DiscoveredSkill } from "./discovery.js";
+import type { ReadyDiscoveredSkill } from "./discovery.js";
 import { discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
 import type { Executor, ExecutorMetadata } from "./executors/types.js";
+import type { ResolvedFixture } from "./fixture.js";
+import { applyFixture, FixtureSetupError, resolveFixture, selectFixture } from "./fixture.js";
 import { gradeTrial } from "./grade.js";
 import type { Arm, ArmResult, CaseResult, EvalCase, TrialResult } from "./types.js";
 import { sha256, skillContentHash } from "./utils.js";
@@ -44,7 +46,8 @@ interface ArmContext {
   readonly cache: ArmCache;
   readonly evalCase: EvalCase;
   readonly executor: Executor;
-  readonly skill: DiscoveredSkill;
+  readonly fixture: ResolvedFixture | undefined;
+  readonly skill: ReadyDiscoveredSkill;
   readonly skillHash: string;
   readonly useCache: boolean;
 }
@@ -52,7 +55,7 @@ interface ArmContext {
 interface CaseContext {
   readonly cache: ArmCache;
   readonly executor: Executor;
-  readonly skill: DiscoveredSkill;
+  readonly skill: ReadyDiscoveredSkill;
   readonly skillHash: string;
   readonly skipBaseline: boolean;
   readonly useCache: boolean;
@@ -134,6 +137,11 @@ function runCase(
   const arms = (evalCase.arms ?? ["skill"]).filter(
     (arm) => arm === "skill" || !context.skipBaseline,
   );
+  // Fixture paths are relative to skillval.yml, which sits in the skill directory.
+  const fixture = resolveFixture(
+    selectFixture(evalCase.fixture, context.skill.evals.fixture),
+    context.skill.skillDirectory,
+  );
   const results = arms.map((arm) => {
     log(`  ${evalCase.id} [${arm}] ...`);
     const result = runArm(
@@ -141,6 +149,7 @@ function runCase(
         cache: context.cache,
         evalCase,
         executor: context.executor,
+        fixture,
         skill: context.skill,
         skillHash: context.skillHash,
         useCache: context.useCache,
@@ -168,6 +177,7 @@ function runArm(context: ArmContext, arm: Arm): ArmResult {
     arm,
     evalCase: context.evalCase,
     executor: context.executor.metadata,
+    fixtureHash: context.fixture?.hash,
     skillHash: context.skillHash,
   };
   if (context.useCache) {
@@ -199,6 +209,10 @@ function runTrial(context: ArmContext, arm: Arm): TrialResult {
   const trialHome = mkdtempSync(join(tmpdir(), "skillval-home-"));
 
   try {
+    const fixtureSetup =
+      context.fixture === undefined
+        ? undefined
+        : applyFixture(context.fixture, workspace, trialHome);
     const trace = context.executor.runTrial({
       arm,
       evalCase: context.evalCase,
@@ -210,10 +224,20 @@ function runTrial(context: ArmContext, arm: Arm): TrialResult {
     const checks = gradeTrial(context.evalCase, arm, trace, workspace);
     return {
       checks,
+      fixtureSetup,
       pass: checks.every((check) => check.pass),
       usage: trace.usage,
     };
   } catch (error) {
+    if (error instanceof FixtureSetupError) {
+      // Workspace staging failed before the agent ran; this is infrastructure, not grading.
+      return {
+        checks: [{ detail: error.message, name: "fixture-setup", pass: false }],
+        fixtureSetup: error.results,
+        pass: false,
+        usage: undefined,
+      };
+    }
     const detail = error instanceof Error ? error.message : String(error);
     return {
       checks: [{ detail, name: "run", pass: false }],

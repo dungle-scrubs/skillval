@@ -40,6 +40,28 @@
             },
             "additionalProperties": false
           },
+          "fixture": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Directory relative to skillval.yml, copied into the workspace.",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "setup": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                },
+                "description": "Shell commands run sequentially inside the workspace after the copy."
+              }
+            },
+            "additionalProperties": false,
+            "minProperties": 1
+          },
           "id": {
             "type": "string",
             "minLength": 1,
@@ -73,6 +95,28 @@
     },
     "class": {
       "enum": ["capability", "preference"]
+    },
+    "fixture": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Directory relative to skillval.yml, copied into the workspace.",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "description": "Shell commands run sequentially inside the workspace after the copy."
+        }
+      },
+      "additionalProperties": false,
+      "minProperties": 1
     },
     "skill": {
       "type": "string",
