@@ -12,6 +12,7 @@ export interface Check {
 export interface FixtureCommandResult {
   readonly command: string;
   readonly exitCode: number | null;
+  readonly signal: string | null;
   readonly stderr: string;
   readonly stdout: string;
 }

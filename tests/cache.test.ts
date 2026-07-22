@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ArmCacheIdentity } from "../src/cache.js";
-import { ArmCache } from "../src/cache.js";
+import { ArmCache, RUNNER_VERSION } from "../src/cache.js";
 import { resolveFixture } from "../src/fixture.js";
 import type { ArmResult, EvalCase } from "../src/types.js";
 
@@ -58,6 +59,33 @@ describe("arm cache", () => {
     cache.store(identity, result);
 
     expect(cache.lookup(changedIdentity)).toBeUndefined();
+  });
+
+  it("keeps the historical key and stored bytes for fixture-free identities", () => {
+    // Golden pin: fixture support must not shift cache keys or stored JSON for existing cases,
+    // so cached results from before the feature stay valid without a RUNNER_VERSION bump.
+    const directory = mkdtempSync(join(tmpdir(), "skillval-cache-test-"));
+    directories.push(directory);
+    const cache = new ArmCache(directory);
+
+    cache.store(identity, result);
+
+    const legacyKey = createHash("sha256")
+      .update(
+        [
+          String(RUNNER_VERSION),
+          identity.skillHash,
+          JSON.stringify(identity.evalCase),
+          identity.arm,
+          identity.executor.name,
+          identity.executor.version,
+          identity.executor.model,
+        ].join("\0"),
+      )
+      .digest("hex");
+    expect(readFileSync(join(directory, "cache", `${legacyKey}.json`), "utf8")).toBe(
+      JSON.stringify(result),
+    );
   });
 
   it("invalidates a fixture-backed arm when one fixture file byte changes", () => {

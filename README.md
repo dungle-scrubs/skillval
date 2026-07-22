@@ -147,7 +147,8 @@ two fields, and at least one is required:
 
 - `path`: a directory relative to `skillval.yml`, copied recursively into the workspace before
   the trial. `.git` and `node_modules` directories are never copied. The path must exist and be a
-  directory; anything else is a validation error at load time.
+  directory, and it may not contain symbolic links (create links with `setup` commands instead);
+  anything else is a validation error at load time.
 - `setup`: shell commands run sequentially inside the workspace after the copy, with a minimal
   environment (`PATH` plus a throwaway `HOME`). A non-zero exit fails the trial with a
   `fixture-setup` error before the agent runs; it is never a grading failure. Each command's
@@ -157,10 +158,11 @@ A suite-level `fixture` applies to every case; a case-level `fixture` replaces i
 Fixture directory contents and setup commands are part of the arm cache identity, so editing a
 fixture file or a setup command invalidates cached results for the cases that use it.
 
-Generation-mode grading snapshots the whole workspace, so fixture files are visible to regex
-assertions and graders alongside anything the agent produced (`.git` contents excepted). Write
-`must_match` patterns against the state you expect after the agent acts, not only against new
-files.
+Generation-mode regex assertions read every workspace file except `.git` and `node_modules`
+contents and the injected `package.json`/`tsconfig.json`, so fixture files are graded alongside
+anything the agent produced. Graders access the workspace directly (`tsc` compiles what it finds
+there). Write `must_match` patterns against the state you expect after the agent acts, not only
+against new files.
 
 Nested `.git` directories inside a fixture are not supported. Express git state with `setup`
 commands instead - this example stages a merge conflict for the agent to resolve:
@@ -229,6 +231,10 @@ buffer.
 - Add cheap trigger simulations for broad description coverage before expensive executor trials.
 - Add a `lint` subcommand for Agent Skills format, references, case coverage, and regular
   expressions.
+- Evaluate agent instruction files (`CLAUDE.md`, `AGENTS.md`) with the same arm comparison, so
+  instruction rules can be proven load-bearing or flagged as no-ops the way skill rules are. The
+  shape is undecided: likely instructions-present vs instructions-absent arms over cases derived
+  from the file's rules.
 - Harvest missed triggers, false invocations, and behavioral regressions from real session
   transcripts as new cases.
 - Support multi-model interpretation and no-op pruning in report summaries, not only raw reports.

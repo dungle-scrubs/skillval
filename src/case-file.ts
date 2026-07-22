@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { CaseContractError, parseCaseValue } from "./case-contract.js";
+import { walkFixtureEntries } from "./fixture.js";
 import type { Fixture, SkillEvals } from "./types.js";
 
 export class CaseFileError extends CaseContractError {
@@ -34,7 +35,8 @@ function assertFixtureDirectory(
   baseDirectory: string,
 ): void {
   if (fixture?.path === undefined) return;
-  const stats = statSync(join(baseDirectory, fixture.path), { throwIfNoEntry: false });
+  const directory = join(baseDirectory, fixture.path);
+  const stats = statSync(directory, { throwIfNoEntry: false });
   if (stats === undefined) {
     throw new CaseFileError(
       `${subject} path "${fixture.path}" does not exist`,
@@ -46,6 +48,12 @@ function assertFixtureDirectory(
       `${subject} path "${fixture.path}" is not a directory`,
       "CASE_FIXTURE_INVALID",
     );
+  }
+  try {
+    walkFixtureEntries(directory);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new CaseFileError(`${subject} path "${fixture.path}" ${detail}`, "CASE_FIXTURE_INVALID");
   }
 }
 

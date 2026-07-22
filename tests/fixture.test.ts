@@ -1,10 +1,12 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,6 +74,35 @@ describe("fixtureIdentityHash", () => {
     expect(fixtureIdentityHash(undefined, ["git init"])).not.toBe(
       fixtureIdentityHash(undefined, ["git init -b main"]),
     );
+  });
+
+  it("distinguishes file-byte boundaries from entry boundaries", () => {
+    // Framing regression: "a" containing "x\0b\0y" must not hash like files a="x" and b="y".
+    const merged = createTempDirectory("skillval-fixture-hash-");
+    writeFileSync(join(merged, "a"), "x\0b\0y");
+    const split = createTempDirectory("skillval-fixture-hash-");
+    writeFileSync(join(split, "a"), "x");
+    writeFileSync(join(split, "b"), "y");
+
+    expect(fixtureIdentityHash(merged, [])).not.toBe(fixtureIdentityHash(split, []));
+  });
+
+  it("changes when a file's executable bit changes", () => {
+    const fixture = createTempDirectory("skillval-fixture-hash-");
+    writeFileSync(join(fixture, "run.sh"), "#!/bin/sh\n");
+    const before = fixtureIdentityHash(fixture, []);
+
+    chmodSync(join(fixture, "run.sh"), 0o755);
+
+    expect(fixtureIdentityHash(fixture, [])).not.toBe(before);
+  });
+
+  it("rejects symlinks inside the fixture directory", () => {
+    const fixture = createTempDirectory("skillval-fixture-hash-");
+    writeFileSync(join(fixture, "file.txt"), "content");
+    symlinkSync(join(fixture, "file.txt"), join(fixture, "alias"));
+
+    expect(() => fixtureIdentityHash(fixture, [])).toThrow('unsupported symlink "alias"');
   });
 
   it("ignores .git and node_modules contents", () => {

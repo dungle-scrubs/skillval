@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -216,6 +216,27 @@ cases: []
 
     expect(() => readCaseFile(path)).toThrow(
       'suite fixture path "fixtures/plain.txt" is not a directory',
+    );
+  });
+
+  it("rejects a fixture directory containing a symlink", () => {
+    const path = writeSuite(`
+skill: fixtures
+class: capability
+cases:
+  - id: linked
+    mode: generation
+    prompt: test
+    fixture:
+      path: fixtures/repo
+`);
+    const repo = join(path, "..", "fixtures", "repo");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(join(repo, "real.txt"), "content");
+    symlinkSync(join(repo, "real.txt"), join(repo, "alias"));
+
+    expect(() => readCaseFile(path)).toThrow(
+      'case "linked" fixture path "fixtures/repo" contains unsupported symlink "alias"',
     );
   });
 
