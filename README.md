@@ -76,7 +76,7 @@ executor: codex
 ```
 
 `roots` contains directories whose immediate children have the form `<skill>/SKILL.md`. Both `~`
-and `$HOME` are expanded. Missing roots are skipped during `run`; `list` returns them in
+and `$HOME` are expanded. `executor` selects the trial adapter: `codex` or `claude`. Missing roots are skipped during `run`; `list` returns them in
 `missingRoots` with JSON output and prints each as `missing root: <path>` in human output.
 
 Configuration path precedence is:
@@ -197,7 +197,7 @@ the trial as a fixture-setup error - here the conflict is the point.
 Executors are adapters with three responsibilities: report stable metadata for cache keys, prepare
 provider-specific skill and environment state, and run one trial request to return a normalized
 `Trace`. The runner owns temporary workspace lifecycle, grading, caching, majority voting, and
-reports. `codex` is the only adapter today.
+reports. Two adapters exist: `codex` and `claude`.
 
 The Codex adapter runs:
 
@@ -212,7 +212,23 @@ command contains `<skill>/SKILL.md`. The adapter also gives the skill arm a work
 
 Baseline arms are not seeded. Their `HOME` points to an empty temporary directory so globally
 installed skills are invisible, while `CODEX_HOME` still points to the user's real `~/.codex` for
-authentication and model configuration. A Claude executor is planned.
+authentication and model configuration.
+
+The Claude adapter runs Claude Code headlessly:
+
+```text
+claude -p <prompt> --output-format stream-json --verbose --no-session-persistence <permissions>
+```
+
+with the workspace as the working directory. Trigger cases run
+`--permission-mode dontAsk --allowedTools "Read,Glob,Grep,Skill"` - read-only, but the Skill tool
+must be allowed or invocation would be blocked before it can be observed. Generation cases run
+`--permission-mode acceptEdits`. Invocation is detected from `Skill` tool_use blocks in the
+stream-json trace that name the evaluated skill. The skill arm seeds a workspace-local
+`.claude/skills/<name>` symlink; the baseline arm points `CLAUDE_CONFIG_DIR` at an empty
+temporary directory so user-level skills are invisible (on macOS credentials live in the
+Keychain, so authentication survives; elsewhere the credentials file is copied across). The
+reported model comes from the real configuration's `settings.json`, or `default`.
 
 Cached arm results are keyed by runner version, skill content hash, serialized case, arm, executor
 name, executor version, and configured model. A trial has a 15-minute timeout and a 64 MB output
@@ -220,8 +236,8 @@ buffer.
 
 ## Roadmap
 
-- Add a Claude executor, then support multi-executor runs through the same normalized trace
-  interface.
+- Support multi-executor runs through the same normalized trace interface, now that `codex` and
+  `claude` adapters share it.
 - Run multiple models and emit per-model reports. A passing binding or trigger result on a weaker
   tier is a conservative bound for stronger tiers. Baseline no-op results remain model-specific,
   and a rule is a prune candidate only when every model in normal use passes at baseline.

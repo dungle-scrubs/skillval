@@ -3,7 +3,7 @@
   "required": ["executor", "roots"],
   "properties": {
     "executor": {
-      "enum": ["codex"],
+      "enum": ["claude", "codex"],
       "description": "Trial executor."
     },
     "roots": {

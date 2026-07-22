@@ -1,8 +1,10 @@
 /** Registers executor adapters and creates them from validated configuration names. */
+import { ClaudeExecutor } from "./claude.js";
 import { CodexExecutor } from "./codex.js";
 import type { Executor } from "./types.js";
 
 const executorFactories = {
+  claude: (): Executor => new ClaudeExecutor(),
   codex: (): Executor => new CodexExecutor(),
 };
 
