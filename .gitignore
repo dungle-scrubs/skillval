@@ -3,3 +3,6 @@ node_modules/
 .pnpm-store/
 coverage/
 *.tsbuildinfo
+*.log
+.DS_Store
+.env*

@@ -1,0 +1,32 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: skillval version
+      description: Output of `skillval --version`
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact `skillval` command, plus relevant `skillval.yml` / case file content.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the error output or report snippet. Redact anything sensitive from traces.
+    validations:
+      required: true
