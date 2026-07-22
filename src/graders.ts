@@ -66,7 +66,12 @@ function gradeTsc(workspace: string): GraderCheck {
       },
     }),
   );
-  const typescriptBinary = packageRequire.resolve("typescript/bin/tsc");
+  // TypeScript 7 stopped exporting ./bin/tsc, so resolve the package root and join to the bin.
+  const typescriptBinary = join(
+    dirname(packageRequire.resolve("typescript/package.json")),
+    "bin",
+    "tsc",
+  );
   const result = spawnSync(typescriptBinary, ["-p", workspace], {
     encoding: "utf8",
     timeout: 120_000,
