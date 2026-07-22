@@ -76,7 +76,7 @@ executor: codex
 ```
 
 `roots` contains directories whose immediate children have the form `<skill>/SKILL.md`. Both `~`
-and `$HOME` are expanded. `executor` selects the trial adapter: `codex` or `claude`. Missing roots are skipped during `run`; `list` returns them in
+and `$HOME` are expanded. `executor` selects the trial adapter: `codex`, `claude`, or `pi`. Missing roots are skipped during `run`; `list` returns them in
 `missingRoots` with JSON output and prints each as `missing root: <path>` in human output.
 
 Configuration path precedence is:
@@ -197,7 +197,7 @@ the trial as a fixture-setup error - here the conflict is the point.
 Executors are adapters with three responsibilities: report stable metadata for cache keys, prepare
 provider-specific skill and environment state, and run one trial request to return a normalized
 `Trace`. The runner owns temporary workspace lifecycle, grading, caching, majority voting, and
-reports. Two adapters exist: `codex` and `claude`.
+reports. Three adapters exist: `codex`, `claude`, and `pi`.
 
 The Codex adapter runs:
 
@@ -229,6 +229,24 @@ stream-json trace that name the evaluated skill. The skill arm seeds a workspace
 temporary directory so user-level skills are invisible (on macOS credentials live in the
 Keychain, so authentication survives; elsewhere the credentials file is copied across). The
 reported model comes from the real configuration's `settings.json`, or `default`.
+
+The pi adapter runs [pi](https://github.com/badlogic/pi-mono) headlessly:
+
+```text
+pi -p --mode json --no-session <arm flags> <tool flags> <prompt>
+```
+
+with the workspace as the working directory. pi has first-class arm switches: the skill arm
+passes `--skill <directory>` so the evaluated skill is discoverable alongside the user's normal
+library, and the baseline arm passes `--no-skills` - no HOME or config redirection is involved.
+Trigger cases restrict tools with `-t read` (read also loads SKILL.md, so invocation stays
+observable); generation cases keep pi's default tool set. pi implements the Agent Skills
+progressive-disclosure standard by having the model `read` a listed skill's SKILL.md, so
+invocation is detected from `read` toolCalls targeting `<skill>/SKILL.md` in the transcript.
+The reported model is `defaultProvider/defaultModel` from `~/.pi/settings.json`. pi resolves
+provider API keys from its auth file or environment variables (e.g. `ZAI_API_KEY`) - the key
+must be available in the environment running skillval. Unlike codex, pi has no OS sandbox;
+generation trials rely on the temporary workspace convention alone.
 
 Cached arm results are keyed by runner version, skill content hash, serialized case, arm, executor
 name, executor version, and configured model. A trial has a 15-minute timeout and a 64 MB output
