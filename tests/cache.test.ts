@@ -21,7 +21,7 @@ const evalCase: EvalCase = {
 const identity: ArmCacheIdentity = {
   arm: "skill",
   evalCase,
-  executor: { model: "model-a", name: "codex", version: "codex 1.0" },
+  executor: { model: "model-a", name: "codex", thinking: "medium", version: "codex 1.0" },
   skillHash: "skill-hash",
 };
 const result: ArmResult = {
@@ -53,6 +53,7 @@ describe("arm cache", () => {
     ["executor name", { ...identity, executor: { ...identity.executor, name: "other" } }],
     ["executor version", { ...identity, executor: { ...identity.executor, version: "codex 2.0" } }],
     ["model", { ...identity, executor: { ...identity.executor, model: "model-b" } }],
+    ["thinking level", { ...identity, executor: { ...identity.executor, thinking: "high" } }],
     ["fixture hash", { ...identity, fixtureHash: "fixture-hash" }],
   ])("invalidates when %s changes", (_field, changedIdentity) => {
     const cache = createCache();
@@ -61,9 +62,9 @@ describe("arm cache", () => {
     expect(cache.lookup(changedIdentity)).toBeUndefined();
   });
 
-  it("keeps the historical key and stored bytes for fixture-free identities", () => {
-    // Golden pin: fixture support must not shift cache keys or stored JSON for existing cases,
-    // so cached results from before the feature stay valid without a RUNNER_VERSION bump.
+  it("pins the exact key derivation and stored bytes for fixture-free identities", () => {
+    // Golden pin: any unintentional change to the key scheme or stored JSON fails here. An
+    // intentional identity change must update this derivation AND bump RUNNER_VERSION.
     const directory = mkdtempSync(join(tmpdir(), "skillval-cache-test-"));
     directories.push(directory);
     const cache = new ArmCache(directory);
@@ -80,6 +81,7 @@ describe("arm cache", () => {
           identity.executor.name,
           identity.executor.version,
           identity.executor.model,
+          identity.executor.thinking,
         ].join("\0"),
       )
       .digest("hex");

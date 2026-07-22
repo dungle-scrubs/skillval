@@ -4,6 +4,10 @@ import type { Arm, EvalCase, Trace } from "../types.js";
 export interface ExecutorMetadata {
   readonly model: string;
   readonly name: string;
+  // The provider-configured thinking/effort level in effect for this run, or "default" when the
+  // provider configuration does not set one. Captured, never controlled: skillval records what
+  // the harness would do so results and cache identity are tied to it.
+  readonly thinking: string;
   readonly version: string;
 }
 

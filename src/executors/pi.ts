@@ -55,20 +55,26 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
   const version = spawnSync("pi", ["--version"], { encoding: "utf8" }).stdout?.trim() ?? "";
   if (version === "") throw new Error("pi CLI not found on PATH");
   let model = "default";
+  let thinking = "default";
   try {
     const settings: unknown = JSON.parse(
       readFileSync(join(settingsDirectory, "settings.json"), "utf8"),
     );
-    if (isRecord(settings) && typeof settings.defaultModel === "string") {
-      model =
-        typeof settings.defaultProvider === "string"
-          ? `${settings.defaultProvider}/${settings.defaultModel}`
-          : settings.defaultModel;
+    if (isRecord(settings)) {
+      if (typeof settings.defaultModel === "string") {
+        model =
+          typeof settings.defaultProvider === "string"
+            ? `${settings.defaultProvider}/${settings.defaultModel}`
+            : settings.defaultModel;
+      }
+      if (typeof settings.defaultThinkingLevel === "string") {
+        thinking = settings.defaultThinkingLevel;
+      }
     }
   } catch {
     // No readable settings file; pi's own default model applies.
   }
-  return { model, name: "pi", version };
+  return { model, name: "pi", thinking, version };
 }
 
 export function parsePiTrace(stdout: string, skillName: string): Trace {
