@@ -69,11 +69,11 @@ function seedSkill(request: TrialRequest): void {
 export function detectCodex(realHome = homedir()): ExecutorMetadata {
   const version = spawnSync("codex", ["--version"], { encoding: "utf8" }).stdout?.trim() ?? "";
   if (version === "") throw new Error("codex CLI not found on PATH");
-  const model =
-    readFileSync(join(realHome, ".codex/config.toml"), "utf8").match(
-      /^model\s*=\s*"([^"]+)"/m,
-    )?.[1] ?? "default";
-  return { model, name: "codex", version };
+  const configuration = readFileSync(join(realHome, ".codex/config.toml"), "utf8");
+  const model = configuration.match(/^model\s*=\s*"([^"]+)"/m)?.[1] ?? "default";
+  const thinking =
+    configuration.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1] ?? "default";
+  return { model, name: "codex", thinking, version };
 }
 
 export function parseCodexTrace(stdout: string, skillName: string): Trace {

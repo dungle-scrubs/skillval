@@ -88,15 +88,19 @@ export function detectClaude(realConfigDirectory = defaultConfigDirectory()): Ex
   const version = spawnSync("claude", ["--version"], { encoding: "utf8" }).stdout?.trim() ?? "";
   if (version === "") throw new Error("claude CLI not found on PATH");
   let model = "default";
+  let thinking = "default";
   try {
     const settings: unknown = JSON.parse(
       readFileSync(join(realConfigDirectory, "settings.json"), "utf8"),
     );
-    if (isRecord(settings) && typeof settings.model === "string") model = settings.model;
+    if (isRecord(settings)) {
+      if (typeof settings.model === "string") model = settings.model;
+      if (typeof settings.effort === "string") thinking = settings.effort;
+    }
   } catch {
     // No readable settings file; the account default model applies.
   }
-  return { model, name: "claude", version };
+  return { model, name: "claude", thinking, version };
 }
 
 export function parseClaudeTrace(stdout: string, skillName: string): Trace {

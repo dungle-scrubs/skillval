@@ -7,7 +7,7 @@ import type { Arm, ArmResult, EvalCase } from "./types.js";
 import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
-export const RUNNER_VERSION = 7;
+export const RUNNER_VERSION = 8;
 
 export interface ArmCacheIdentity {
   readonly arm: Arm;
@@ -46,6 +46,7 @@ export class ArmCache {
       identity.executor.name,
       identity.executor.version,
       identity.executor.model,
+      identity.executor.thinking,
     ];
     // Appended conditionally so fixture-free identities keep their historical keys.
     if (identity.fixtureHash !== undefined) parts.push(identity.fixtureHash);

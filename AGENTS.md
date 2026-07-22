@@ -25,7 +25,8 @@ agent guidance.
   produced files (typescript + @types/node resolved from skillval's own
   install, never the cwd).
 - `src/cache.ts` - arm results keyed by runner version + skill content
-  hash + case JSON + arm + executor version + model, under
+  hash + case JSON + arm + executor version + model + thinking level
+  (+ fixture hash when a fixture is used), under
   `$XDG_STATE_HOME/skillval` (default `~/.local/state/skillval`).
 - `src/config.ts` - `$XDG_CONFIG_HOME/skillval/config.yml`
   (default `~/.config/skillval/config.yml`), `SKILLVAL_CONFIG` env

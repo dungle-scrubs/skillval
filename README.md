@@ -92,7 +92,7 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 - `cache/` stores arm results.
 - `reports/` stores run reports named by a hash of the participating skills and their content
   hashes. Each report also includes every participating skill's content hash and the executor's
-  name, version, and model identity.
+  name, version, model, and thinking-level identity.
 
 `skillval list` returns the skill name, configured root, class, case count, whether `skillval.yml`
 exists, and a `missing`, `invalid`, or `ready` status in JSON output. Invalid case files include a
@@ -248,9 +248,17 @@ provider API keys from its auth file or environment variables (e.g. `ZAI_API_KEY
 must be available in the environment running skillval. Unlike codex, pi has no OS sandbox;
 generation trials rely on the temporary workspace convention alone.
 
+Executors never set a model or thinking/effort level; trials inherit the harness defaults the
+user has configured. Each adapter captures both into its identity so results are always
+associated with what actually ran: codex reads `model` and `model_reasoning_effort` from
+`~/.codex/config.toml`, claude reads `model` and `effort` from `settings.json`, and pi reads
+`defaultProvider/defaultModel` and `defaultThinkingLevel` from `~/.pi/settings.json`. A missing
+value is recorded as `default` (the provider's own default applies). Changing any of these in
+the provider configuration therefore invalidates the affected cached results.
+
 Cached arm results are keyed by runner version, skill content hash, serialized case, arm, executor
-name, executor version, and configured model. A trial has a 15-minute timeout and a 64 MB output
-buffer.
+name, executor version, configured model, and configured thinking level. A trial has a 15-minute
+timeout and a 64 MB output buffer.
 
 ## Roadmap
 
