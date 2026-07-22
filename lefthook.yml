@@ -8,3 +8,13 @@ pre-commit:
     types:
       glob: "*.{ts,tsx}"
       run: pnpm tsc --noEmit
+
+pre-push:
+  commands:
+    trufflehog:
+      run: |
+        if command -v trufflehog >/dev/null 2>&1; then
+          trufflehog git file://. --only-verified --fail --no-update
+        else
+          echo "trufflehog not installed; skipping secret scan"
+        fi

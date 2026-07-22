@@ -2,6 +2,15 @@
   "name": "@dungle-scrubs/skillval",
   "version": "0.1.0",
   "description": "Deterministic evaluation for agent skills",
+  "keywords": [
+    "agent-skills",
+    "agents",
+    "cli",
+    "codex",
+    "evaluation",
+    "skill-md",
+    "testing"
+  ],
   "type": "module",
   "bin": {
     "skillval": "dist/cli.js"
@@ -32,6 +41,9 @@
   "homepage": "https://github.com/dungle-scrubs/skillval#readme",
   "license": "MIT",
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -44,10 +56,15 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.6",
+    "@biomejs/biome": "2.5.5",
     "lefthook": "^2.1.10",
-    "tsx": "^4.23.1",
     "tsup": "^8.5.0",
+    "tsx": "^4.23.1",
     "vitest": "^4.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": ">=0.28.1"
+    }
   }
 }

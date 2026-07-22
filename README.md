@@ -179,3 +179,13 @@ buffer.
 - Harvest missed triggers, false invocations, and behavioral regressions from real session
   transcripts as new cases.
 - Support multi-model interpretation and no-op pruning in report summaries, not only raw reports.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Commits follow Conventional Commits, PRs are
+squash-merged, and every change must pass
+`pnpm typecheck && pnpm lint && pnpm schema:check && pnpm test && pnpm build`.
+
+## License
+
+[MIT](LICENSE)
