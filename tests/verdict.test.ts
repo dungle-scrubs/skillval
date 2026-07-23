@@ -3,10 +3,18 @@ import { groupVerdict, VERDICT_TEXT } from "../src/verdict.js";
 
 describe("groupVerdict", () => {
   it("flags interference when the skill works alone but the loadout breaks it", () => {
+    // Peers pass without the target, so adding the target is what breaks the case: real interference.
     expect(groupVerdict(true, false, true, true)).toBe("interference");
-    expect(groupVerdict(true, false, false, true)).toBe("interference");
-    // Interference holds even for a pure trigger case (peers not meaningful).
+    // Interference holds even for a pure trigger case (peers not meaningful): solo-vs-group still
+    // isolates the target's effect.
     expect(groupVerdict(true, false, true, false)).toBe("interference");
+    expect(groupVerdict(true, false, false, false)).toBe("interference");
+  });
+
+  it("does not blame the target when the peers arm also fails the case", () => {
+    // solo passes, group fails, but peers (loadout minus target) is meaningful and also fails: the
+    // loadout breaks the case without the target, so this is not the target's interference.
+    expect(groupVerdict(true, false, false, true)).toBe("inconclusive");
   });
 
   it("is load-bearing when the loadout passes only with the skill", () => {
