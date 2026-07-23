@@ -25,6 +25,33 @@
                 },
                 "uniqueItems": true
               },
+              "json_schema": {
+                "type": "object",
+                "required": ["file", "schema"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "description": "Produced file, relative to the workspace, parsed as JSON and validated.",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "patternProperties": {
+                          "^.*$": {}
+                        }
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ],
+                    "description": "JSON Schema (draft 2020-12) the produced file must satisfy; an object or a boolean schema. Omit $schema, or set it to 2020-12; other declared dialects are rejected."
+                  }
+                },
+                "additionalProperties": false
+              },
               "must_match": {
                 "type": "array",
                 "items": {

@@ -126,6 +126,104 @@ cases:
     expect(() => parseCaseFile(source)).toThrow('grader "tsc" does not support trigger mode');
   });
 
+  it("parses a json_schema grader on a generation case", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: schema-case
+    mode: generation
+    prompt: emit config
+    assert:
+      json_schema:
+        file: out.json
+        schema:
+          type: object
+          required: [name]
+`;
+
+    const parsed = parseCaseFile(source);
+
+    expect(parsed.cases[0]?.assert?.json_schema).toMatchObject({
+      file: "out.json",
+      schema: { required: ["name"], type: "object" },
+    });
+  });
+
+  it("rejects a json_schema grader on a non-generation case", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: wrong-mode
+    mode: trigger
+    prompt: test
+    assert:
+      json_schema:
+        file: out.json
+        schema:
+          type: object
+`;
+
+    expect(() => parseCaseFile(source)).toThrow(
+      'grader "json_schema" does not support trigger mode',
+    );
+  });
+
+  it("rejects a json_schema grader whose schema does not compile", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: bad-schema
+    mode: generation
+    prompt: test
+    assert:
+      json_schema:
+        file: out.json
+        schema:
+          type: strng
+`;
+
+    expect(() => parseCaseFile(source)).toThrow("invalid json_schema");
+  });
+
+  it("rejects a json_schema file path that escapes the workspace", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: escaping
+    mode: generation
+    prompt: test
+    assert:
+      json_schema:
+        file: ../shared.json
+        schema:
+          type: object
+`;
+
+    expect(() => parseCaseFile(source)).toThrow("must be a path inside the workspace");
+  });
+
+  it("accepts a json_schema filename that merely begins with dots", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: dotted
+    mode: generation
+    prompt: test
+    assert:
+      json_schema:
+        file: ..config.json
+        schema:
+          type: object
+`;
+
+    expect(parseCaseFile(source).cases[0]?.assert?.json_schema?.file).toBe("..config.json");
+  });
+
   it("rejects whitespace-only identifiers consistently with the published schema", () => {
     const source = `
 skill: " "
