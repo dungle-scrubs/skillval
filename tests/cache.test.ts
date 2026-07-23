@@ -90,6 +90,56 @@ describe("arm cache", () => {
     );
   });
 
+  it("keys the baseline arm independently of the skill hash", () => {
+    const cache = createCache();
+    const baseline: ArmCacheIdentity = { ...identity, arm: "baseline" };
+    const baselineResult: ArmResult = { ...result, arm: "baseline" };
+
+    cache.store(baseline, baselineResult);
+
+    // The baseline arm never installs the skill, so editing the skill must not bust its cache.
+    expect(cache.lookup({ ...baseline, skillHash: "edited-skill" })).toEqual({
+      ...baselineResult,
+      cached: true,
+    });
+  });
+
+  it("still keys the skill arm on the skill hash", () => {
+    const cache = createCache();
+
+    cache.store(identity, result);
+
+    expect(cache.lookup({ ...identity, skillHash: "edited-skill" })).toBeUndefined();
+  });
+
+  it("pins the baseline key derivation, which omits the skill hash", () => {
+    const directory = mkdtempSync(join(tmpdir(), "skillval-cache-test-"));
+    directories.push(directory);
+    const cache = new ArmCache(directory);
+    const baseline: ArmCacheIdentity = { ...identity, arm: "baseline" };
+    const baselineResult: ArmResult = { ...result, arm: "baseline" };
+
+    cache.store(baseline, baselineResult);
+
+    const baselineKey = createHash("sha256")
+      .update(
+        [
+          String(RUNNER_VERSION),
+          "",
+          JSON.stringify(baseline.evalCase),
+          baseline.arm,
+          baseline.executor.name,
+          baseline.executor.version,
+          baseline.executor.model,
+          baseline.executor.thinking,
+        ].join("\0"),
+      )
+      .digest("hex");
+    expect(readFileSync(join(directory, "cache", `${baselineKey}.json`), "utf8")).toBe(
+      JSON.stringify(baselineResult),
+    );
+  });
+
   it("invalidates a fixture-backed arm when one fixture file byte changes", () => {
     const cache = createCache();
     const fixtureDirectory = mkdtempSync(join(tmpdir(), "skillval-cache-fixture-"));
