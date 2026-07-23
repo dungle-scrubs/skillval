@@ -7,7 +7,7 @@ import type { Arm, ArmResult, EvalCase } from "./types.js";
 import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
-export const RUNNER_VERSION = 8;
+export const RUNNER_VERSION = 9;
 
 export interface ArmCacheIdentity {
   readonly arm: Arm;
@@ -37,10 +37,14 @@ export class ArmCache {
   }
 
   #path(identity: ArmCacheIdentity): string {
-    // Every input that can change an arm result belongs in this identity.
+    // Every input that can change an arm result belongs in this identity. The baseline arm never
+    // installs the skill, so its result cannot depend on skill content; excluding the skill hash
+    // from the baseline key lets a baseline result survive skill edits, roughly halving recompute
+    // on the iterate-a-skill-and-re-run loop.
+    const skillComponent = identity.arm === "skill" ? identity.skillHash : "";
     const parts = [
       String(RUNNER_VERSION),
-      identity.skillHash,
+      skillComponent,
       JSON.stringify(identity.evalCase),
       identity.arm,
       identity.executor.name,
