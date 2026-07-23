@@ -135,6 +135,12 @@ Case fields:
   JSON; a schema mismatch reports the failing instance path. Omit `$schema` or set it to 2020-12;
   other declared dialects, an escaping `file` path, or a schema that does not compile are validation
   errors.
+- `assert.command_exit`: runs a shell command in the workspace and passes when it exits with the
+  expected code, for generation cases. Takes `command` and optional `expect` (default `0`). The
+  command is case-authored, the same trust level as fixture `setup`; it runs with a minimal
+  environment and is killed after 120 seconds. This is the language-agnostic grader: run a
+  compiler, test runner, or validator over produced files in any language. Used in a non-generation
+  case it is a validation error.
 - `trials`: an integer from 1 through 5. Results use a strict majority. If configured trials
   disagree, the arm escalates to 5 trials.
 - `fixture`: optional workspace fixture for this case. It replaces the suite-level `fixture`

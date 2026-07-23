@@ -206,6 +206,44 @@ cases:
     expect(() => parseCaseFile(source)).toThrow("must be a path inside the workspace");
   });
 
+  it("parses a command_exit grader on a generation case", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: cmd
+    mode: generation
+    prompt: build it
+    assert:
+      command_exit:
+        command: pytest -q
+        expect: 0
+`;
+
+    expect(parseCaseFile(source).cases[0]?.assert?.command_exit).toMatchObject({
+      command: "pytest -q",
+      expect: 0,
+    });
+  });
+
+  it("rejects a command_exit grader on a non-generation case", () => {
+    const source = `
+skill: graders
+class: capability
+cases:
+  - id: wrong-mode
+    mode: trigger
+    prompt: test
+    assert:
+      command_exit:
+        command: "true"
+`;
+
+    expect(() => parseCaseFile(source)).toThrow(
+      'grader "command_exit" does not support trigger mode',
+    );
+  });
+
   it("accepts a json_schema filename that merely begins with dots", () => {
     const source = `
 skill: graders
