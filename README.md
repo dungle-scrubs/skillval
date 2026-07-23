@@ -194,7 +194,14 @@ Both run with a minimal environment - only `PATH` is inherited, and `HOME` point
 trial directory - and are killed on timeout, but that is scoping, not a sandbox: nothing prevents
 a command from reading or writing anything your user account can reach. Evaluating a skill
 therefore means trusting its `skillval.yml` exactly as you would trust running its Makefile or
-npm scripts. Review the case file before running a suite from a repository you do not control.
+npm scripts.
+
+Because of that, case-authored shell is **off by default**. A run refuses any selected case that
+carries fixture `setup` commands or a `command_exit` grader, failing before any trial spawns with a
+message naming the skill, case, and surface. Pass `--allow-shell` to opt in once you have reviewed
+the case file. Keeping it off by default means pointing skillval at a skill from a repository you do
+not control never runs that skill's shell unless you explicitly allow it - the safe default for CI
+and for auditing third-party skills.
 
 The agent trials themselves are a separate boundary, sandboxed per executor (see
 [Executors](#executors)): codex trials get an OS sandbox, claude trials get permission modes, and
@@ -240,8 +247,9 @@ Case fields:
   errors.
 - `assert.command_exit`: runs a shell command in the workspace and passes when it exits with the
   expected code, for generation cases. Takes `command` and optional `expect` (default `0`). The
-  command is case-authored arbitrary shell, the same trust level as fixture `setup` (see
-  [Trust model](#trust-model)); it runs with a minimal environment and is killed after
+  command is case-authored arbitrary shell, the same trust level as fixture `setup`, and is off by
+  default: a case using it is refused unless the run passes `--allow-shell` (see
+  [Trust model](#trust-model)). It runs with a minimal environment and is killed after
   120 seconds. This is the language-agnostic grader: run a
   compiler, test runner, or validator over produced files in any language. Used in a non-generation
   case it is a validation error.
@@ -267,9 +275,10 @@ two fields, and at least one is required:
   anything else is a validation error at load time.
 - `setup`: shell commands run sequentially inside the workspace after the copy, with a minimal
   environment (`PATH` plus a throwaway `HOME`). These are case-authored arbitrary shell commands
-  executed on the grading machine (see [Trust model](#trust-model)). A non-zero exit fails the
-  trial with a `fixture-setup` error before the agent runs; it is never a grading failure. Each command's
-  stdout and stderr are captured into the trial record.
+  executed on the grading machine and are off by default: a case whose fixture carries `setup` is
+  refused unless the run passes `--allow-shell` (see [Trust model](#trust-model)). A non-zero exit
+  fails the trial with a `fixture-setup` error before the agent runs; it is never a grading failure.
+  Each command's stdout and stderr are captured into the trial record.
 
 A suite-level `fixture` applies to every case; a case-level `fixture` replaces it entirely.
 Fixture directory contents and setup commands are part of the arm cache identity, so editing a

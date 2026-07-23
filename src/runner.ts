@@ -19,6 +19,7 @@ import { groupVerdict, VERDICT_TEXT } from "./verdict.js";
 import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
 
 export interface RunOptions {
+  readonly allowShell: boolean;
   readonly allowUnsandboxedPi: boolean;
   readonly caseFilter: string | undefined;
   readonly effort?: string;
@@ -118,6 +119,7 @@ export function runEvaluation(
 ): RunOutcome {
   const discovery = discoverSkills(config.roots);
   const selectedSkills = selectSkills(discovery, options.requestedSkills);
+  assertShellAllowed(selectedSkills, options.caseFilter, options.allowShell);
   assertPiGenerationAcknowledged(
     config.executor,
     selectedSkills,
@@ -215,6 +217,42 @@ function resolveRunLoadout(
     })),
     name: resolved.name,
   };
+}
+
+// Case-authored shell runs from two surfaces - fixture `setup` commands and the `command_exit`
+// grader - both executed with `shell: true` on the grading machine, at the trust level of the case
+// file. Off by default, a run refuses any selected case that carries either, so evaluating an
+// untrusted third-party skill never runs arbitrary shell unacknowledged. --allow-shell opts in. The
+// refusal fires before any trial spawns and names the skill, case, and surface. Loadout members are
+// only seeded (their cases never run), so only the selected target skills' cases are scanned.
+export function assertShellAllowed(
+  skills: readonly ReadyDiscoveredSkill[],
+  caseFilter: string | undefined,
+  allow: boolean,
+): void {
+  if (allow) return;
+  for (const skill of skills) {
+    for (const evalCase of skill.evals.cases) {
+      if (caseFilter !== undefined && evalCase.id !== caseFilter) continue;
+      // The effective fixture is the case's own, or the suite default it inherits; a case fixture
+      // replaces the suite one entirely, so check exactly what this case would run.
+      const fixture = selectFixture(evalCase.fixture, skill.evals.fixture);
+      if (fixture?.setup !== undefined && fixture.setup.length > 0) {
+        throw new Error(
+          `case "${evalCase.id}" (skill "${skill.name}") has fixture setup commands, which run ` +
+            "arbitrary shell on the grading machine. Re-run with --allow-shell to permit " +
+            "case-authored shell, or remove the setup commands.",
+        );
+      }
+      if (evalCase.assert?.command_exit !== undefined) {
+        throw new Error(
+          `case "${evalCase.id}" (skill "${skill.name}") uses the command_exit grader, which runs ` +
+            "arbitrary shell on the grading machine. Re-run with --allow-shell to permit " +
+            "case-authored shell, or remove the command_exit grader.",
+        );
+      }
+    }
+  }
 }
 
 // pi has no OS sandbox, so generation trials run agent writes with no enforced isolation. Refuse

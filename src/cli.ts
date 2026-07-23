@@ -16,6 +16,7 @@ interface ListOptions {
 }
 
 interface RunCommandOptions {
+  readonly allowShell?: boolean;
   readonly allowUnsandboxedPi?: boolean;
   readonly cache: boolean;
   readonly case?: string;
@@ -51,6 +52,10 @@ program
   .option("--no-cache", "ignore cached arm results")
   .option("--skip-baseline", "do not run baseline arms")
   .option(
+    "--allow-shell",
+    "permit case-authored shell (fixture setup commands and the command_exit grader)",
+  )
+  .option(
     "--allow-unsandboxed-pi",
     "acknowledge that pi generation trials run without an OS sandbox",
   )
@@ -62,6 +67,7 @@ program
     const outcome = runEvaluation(
       config,
       {
+        allowShell: options.allowShell === true,
         allowUnsandboxedPi: options.allowUnsandboxedPi === true,
         caseFilter: options.case,
         effort: options.effort,
