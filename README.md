@@ -6,6 +6,19 @@ agent behavior instead of merely checking whether the final answer looks accepta
 baseline also passes, the rule is flagged as a no-op and a possible prune candidate. You can only
 trust what you test.
 
+## Capability and preference rules
+
+A skill carries two kinds of rule. **Capability** rules teach a model something it does not yet
+reliably do. **Preference** rules express a choice - style, convention, house taste - a model would
+not reach on its own. Most skills mix both. The distinction has teeth because capabilities expire:
+as models are trained on the same information, a capability rule stops changing behavior and turns
+into dead weight. skillval finds those.
+
+Each case runs with the skill and again without it (the baseline arm). Skill-pass with
+baseline-fail means the rule is load-bearing. Skill-pass with baseline-pass means the model already
+does this on its own - the rule is a prune candidate. Preferences stay; stale capabilities go.
+Cases can record which kind they exercise with the `type` field (`capability` or `preference`).
+
 ## Install
 
 ```sh
