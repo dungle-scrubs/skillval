@@ -10,7 +10,7 @@ import type { ArmResult, EvalCase } from "../src/types.js";
 
 const directories: string[] = [];
 const evalCase: EvalCase = {
-  arms: ["skill", "baseline"],
+  arms: ["solo", "baseline"],
   assert: { must_match: ["as const"] },
   id: "enum-question",
   mode: "trigger",
@@ -19,7 +19,7 @@ const evalCase: EvalCase = {
   trials: 1,
 };
 const identity: ArmCacheIdentity = {
-  arm: "skill",
+  arm: "solo",
   evalCase,
   executor: {
     invocationDetection: "heuristic",
@@ -31,7 +31,7 @@ const identity: ArmCacheIdentity = {
   loadoutHash: "loadout-hash",
 };
 const result: ArmResult = {
-  arm: "skill",
+  arm: "solo",
   cached: false,
   pass: true,
   trials: [],

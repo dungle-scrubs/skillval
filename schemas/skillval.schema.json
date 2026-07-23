@@ -11,7 +11,7 @@
           "arms": {
             "type": "array",
             "items": {
-              "enum": ["baseline", "skill"]
+              "enum": ["baseline", "solo"]
             },
             "uniqueItems": true
           },

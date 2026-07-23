@@ -15,7 +15,10 @@ export function gradeTrial(evalCase: EvalCase, arm: Arm, trace: Trace, workspace
     pass: trace.completed,
   });
 
-  if (evalCase.should_trigger !== undefined && arm === "skill") {
+  // should_trigger asks whether the target skill activated, so it grades only on arms that seed the
+  // target. In solo mode that is the solo arm; group mode adds the group arm (handled where those
+  // arms are graded). It is never graded on baseline or peers, where the target is absent by design.
+  if (evalCase.should_trigger !== undefined && arm === "solo") {
     const evidence = trace.invocationEvidence === null ? "none" : trace.invocationEvidence;
     checks.push({
       detail: `invoked=${trace.invoked}, expected=${evalCase.should_trigger}, evidence=${evidence}`,

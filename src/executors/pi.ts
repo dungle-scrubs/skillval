@@ -27,10 +27,14 @@ export const PI_EFFORT_LEVELS: readonly string[] = [
 ];
 export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "heuristic";
 
-// A repeatable --skill per seeded skill, or --no-skills for the empty (baseline) arm.
+// Every arm runs clean: --no-skills hides the user's global skill library, and a repeatable --skill
+// seeds exactly this arm's set on top. pi loads explicit --skill paths even under --no-skills
+// (verified against pi's resource loader), so the empty baseline sees no skills and the solo arm
+// sees only the target.
 export function piSkillArgs(seededSkills: readonly SeededSkill[]): string[] {
-  if (seededSkills.length === 0) return ["--no-skills"];
-  return seededSkills.flatMap((skill) => ["--skill", skill.directory]);
+  const args = ["--no-skills"];
+  for (const skill of seededSkills) args.push("--skill", skill.directory);
+  return args;
 }
 
 export class PiExecutor implements Executor {
@@ -52,9 +56,8 @@ export class PiExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
-    // pi has first-class arm switches: --skill (repeatable) makes each seeded skill discoverable
-    // alongside the user's normal library, --no-skills hides every skill for the empty (baseline)
-    // arm. No HOME or config redirection is needed.
+    // Clean skill loading (see piSkillArgs): --no-skills hides the user's library, --skill seeds
+    // this arm's set. No HOME or config redirection is needed.
     const arm = piSkillArgs(request.seededSkills);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
     const selection: string[] = [];

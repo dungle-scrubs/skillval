@@ -1,10 +1,14 @@
 # skillval
 
 `skillval` evaluates [Agent Skills](https://agentskills.io/) with deterministic graders and no
-model judges. Each case can run a skill arm and a baseline arm, measuring whether a skill changes
-agent behavior instead of merely checking whether the final answer looks acceptable. When the
-baseline also passes, the rule is flagged as a no-op and a possible prune candidate. You can only
-trust what you test.
+model judges. Each case can run a `solo` arm (the skill alone) and a `baseline` arm (no skill),
+measuring whether a skill changes agent behavior instead of merely checking whether the final
+answer looks acceptable. When the baseline also passes, the rule is flagged as a no-op and a
+possible prune candidate. You can only trust what you test.
+
+Both arms run in a clean environment - your globally installed skills are hidden - so the only
+variable is whether the skill under test is present. `solo` seeds just that skill; `baseline` seeds
+nothing.
 
 ## Capability and preference rules
 
@@ -14,10 +18,20 @@ not reach on its own. Most skills mix both. The distinction has teeth because ca
 as models are trained on the same information, a capability rule stops changing behavior and turns
 into dead weight. skillval finds those.
 
-Each case runs with the skill and again without it (the baseline arm). Skill-pass with
-baseline-fail means the rule is load-bearing. Skill-pass with baseline-pass means the model already
+Each case runs with the skill (`solo`) and again without it (`baseline`). Solo-pass with
+baseline-fail means the rule is load-bearing. Solo-pass with baseline-pass means the model already
 does this on its own - the rule is a prune candidate. Preferences stay; stale capabilities go.
 Cases can record which kind they exercise with the `type` field (`capability` or `preference`).
+
+### Reading a result
+
+- **`solo` pass, `baseline` fail** - the skill is doing the work; it changed behavior. Load-bearing.
+- **`solo` pass, `baseline` pass** - the case passes with or without the skill; the model already
+  does this. A no-op and a prune candidate.
+- **`solo` fail** - the skill did not produce the required behavior. A failing case to investigate.
+
+`should_trigger`, when set, is checked only on arms where the skill under test is present (`solo`),
+never on `baseline`, where it is absent by design.
 
 ## Install
 
@@ -49,7 +63,7 @@ cases:
     mode: generation
     type: preference
     rule: enums-as-const
-    arms: [skill, baseline]
+    arms: [solo, baseline]
     prompt: >-
       Create sizes.ts with a fixed set of small, medium, and large values.
     assert:
@@ -75,7 +89,7 @@ all cases passed
 Run every discovered skill that has a `skillval.yml` by omitting the skill names. Use `--case <id>`
 to select one case, `--no-cache` to ignore cached arm results, `--skip-baseline` to omit baseline
 arms, and `--json` for the complete report. The command exits with status 1 when any selected
-case's skill arm fails.
+case's solo arm fails.
 
 Use `--model <model>` and `--effort <level>` to pin the executor's model and effort for the run,
 so you can evaluate one skill under, for example, `--model sonnet --effort medium`. Both pass
@@ -162,8 +176,8 @@ Case fields:
   temporary workspace.
 - `type`: optional `preference` or `capability` classification.
 - `rule`: optional stable rule identifier included in reports.
-- `should_trigger`: optional expected invocation verdict. It is checked only on the skill arm.
-- `arms`: `skill`, or `skill` and `baseline`. The default is `[skill]`.
+- `should_trigger`: optional expected invocation verdict. It is checked only on arms where the skill under test is present (`solo`).
+- `arms`: `solo`, or `solo` and `baseline`. The default is `[solo]`.
 - `prompt`: the complete trial prompt.
 - `assert.must_match`: JavaScript regular expressions that must match, with the `m` flag.
 - `assert.must_not_match`: JavaScript regular expressions that must not match, with the `m` flag.
@@ -261,12 +275,14 @@ codex exec --json --skip-git-repo-check --ephemeral -s <sandbox> -C <workspace> 
 
 Trigger cases use a read-only sandbox. Generation cases use `workspace-write`. Codex has no
 dedicated skill-invocation event, so its adapter detects invocation when a `command_execution`
-command contains `<skill>/SKILL.md`. The adapter also gives the skill arm a workspace-local
-`.agents/skills/<name>` symlink to the evaluated skill.
+command contains `<skill>/SKILL.md`. Each arm seeds its own skills as workspace-local
+`.agents/skills/<name>` symlinks - the `solo` arm the evaluated skill, the `baseline` arm none.
 
-Baseline arms are not seeded. Their `HOME` points to an empty temporary directory so globally
-installed skills are invisible, while `CODEX_HOME` still points to the user's real `~/.codex` for
-authentication and model configuration.
+Every arm runs clean: `HOME` points to an empty temporary directory so `~/.agents/skills` is
+invisible, and `CODEX_HOME` points to a per-trial home that symlinks only `config.toml` and
+`auth.json` from the real `~/.codex`. Skills, plugins, and plugin-activation state are omitted, so
+no globally installed skill leaks in through `CODEX_HOME`. Authentication and model configuration
+are unchanged; the only skills the model sees are the ones seeded into the workspace.
 
 The Claude adapter runs Claude Code headlessly:
 
@@ -278,11 +294,14 @@ with the workspace as the working directory. Trigger cases run
 `--permission-mode dontAsk --allowedTools "Read,Glob,Grep,Skill"` - read-only, but the Skill tool
 must be allowed or invocation would be blocked before it can be observed. Generation cases run
 `--permission-mode acceptEdits`. Invocation is detected from `Skill` tool_use blocks in the
-stream-json trace that name the evaluated skill. The skill arm seeds a workspace-local
-`.claude/skills/<name>` symlink; the baseline arm points `CLAUDE_CONFIG_DIR` at an empty
-temporary directory so user-level skills are invisible (on macOS credentials live in the
-Keychain, so authentication survives; elsewhere the credentials file is copied across). The
-reported model comes from the real configuration's `settings.json`, or `default`.
+stream-json trace that name the evaluated skill. Every arm points `CLAUDE_CONFIG_DIR` at a clean
+directory holding the credentials file and a minimal `settings.json` rebuilt from only the model,
+effort, and auth-routing keys - hooks, permissions, plugins, and user skills are omitted, so no
+user configuration acts on one arm differently (on macOS credentials live in the Keychain, so
+authentication survives; elsewhere the credentials file is copied across). Each arm seeds its own
+skills as workspace-local `.claude/skills/<name>` symlinks - the `solo` arm the target, the
+`baseline` arm none. The reported model and effort come from the real configuration's
+`settings.json` (`model`/`effortLevel`), or `default`.
 
 The pi adapter runs [pi](https://github.com/badlogic/pi-mono) headlessly:
 
@@ -290,9 +309,10 @@ The pi adapter runs [pi](https://github.com/badlogic/pi-mono) headlessly:
 pi -p --mode json --no-session <arm flags> <tool flags> <prompt>
 ```
 
-with the workspace as the working directory. pi has first-class arm switches: the skill arm
-passes `--skill <directory>` so the evaluated skill is discoverable alongside the user's normal
-library, and the baseline arm passes `--no-skills` - no HOME or config redirection is involved.
+with the workspace as the working directory. Every arm passes `--no-skills` to hide the user's
+global skill library, plus a repeatable `--skill <directory>` per seeded skill (pi loads explicit
+`--skill` paths even under `--no-skills`); the `solo` arm seeds the target, the `baseline` arm
+seeds nothing - no HOME or config redirection is involved.
 Trigger cases restrict tools with `-t read` (read also loads SKILL.md, so invocation stays
 observable); generation cases keep pi's default tool set. pi implements the Agent Skills
 progressive-disclosure standard by having the model `read` a listed skill's SKILL.md, so

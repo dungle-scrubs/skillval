@@ -1,6 +1,6 @@
 /** Implements Codex-specific skill seeding, process isolation, invocation, and trace parsing. */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
@@ -59,16 +59,16 @@ export class CodexExecutor implements Executor {
     if (this.#overrides.effort !== undefined) {
       selection.push("-c", `model_reasoning_effort=${JSON.stringify(this.#overrides.effort)}`);
     }
-    // Baselines need the real Codex configuration for authentication and model selection, but an
-    // empty HOME prevents globally installed skills from influencing the comparison arm.
-    const environment =
-      request.arm === "baseline"
-        ? {
-            ...process.env,
-            CODEX_HOME: join(this.#realHome, ".codex"),
-            HOME: request.home,
-          }
-        : { ...process.env };
+    // Every arm runs clean: an empty HOME hides HOME-discovered skills (~/.agents/skills), and
+    // CODEX_HOME points at a clean copy that mirrors the real config and auth but excludes the
+    // user's installed skills under ~/.codex/skills (which are discovered via CODEX_HOME, so a
+    // globally installed skill - including the one under test - must not leak into an arm). The
+    // only skills the model sees are the ones seeded into the workspace for this arm.
+    const environment = {
+      ...process.env,
+      CODEX_HOME: prepareCleanCodexHome(request.home, this.#realHome),
+      HOME: request.home,
+    };
     const result = spawnSync(
       "codex",
       [
@@ -96,6 +96,25 @@ export class CodexExecutor implements Executor {
 
     return parseCodexTrace(result.stdout, request.skillName);
   }
+}
+
+// A clean CODEX_HOME that mirrors only what authentication and model selection need - config.toml
+// and auth.json, by symlink so token refreshes still reach the real file. Everything else is
+// omitted on purpose: the skills and plugins directories and the state database that activates
+// plugin-contributed skills, so no globally installed skill can leak into a trial through
+// CODEX_HOME. config.toml is preserved whole because it also carries provider and auth routing;
+// known limitation: if it registers skills explicitly via skills.config entries, those are not
+// stripped (uncommon, and only a confound when the skill under test is one of them). Codex creates
+// any caches or state it needs inside this throwaway home.
+function prepareCleanCodexHome(home: string, realHome: string): string {
+  const cleanHome = join(home, "codex-home");
+  mkdirSync(cleanHome, { recursive: true });
+  const realCodex = join(realHome, ".codex");
+  for (const file of ["config.toml", "auth.json"]) {
+    const source = join(realCodex, file);
+    if (existsSync(source)) symlinkSync(source, join(cleanHome, file));
+  }
+  return cleanHome;
 }
 
 export function seedSkills(workspace: string, skills: readonly SeededSkill[]): void {
