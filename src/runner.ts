@@ -275,6 +275,11 @@ export function computePlan(
   let trialsMin = 0;
   let trialsMax = 0;
   const skills: SkillPlan[] = [];
+  // The runner stores each arm's result the moment it completes, so a later arm with an identical
+  // cache key reuses it within the same run. Track the keys this plan has already accounted for (in
+  // the same skill/case/arm order the runner walks) so a repeat is predicted as a cache hit, not a
+  // second run - matching what a real run spends. Only meaningful when the cache is in use.
+  const scheduledKeys = new Set<string>();
 
   for (const { contentHash, skill } of skillInputs) {
     // Mirrors runCase: a group arm is reused from solo when the target has no peers in the loadout.
@@ -310,7 +315,12 @@ export function computePlan(
           target.name,
           seeded,
         );
-        const cached = options.useCache && cache.lookup(identity) !== undefined;
+        const key = cache.keyFor(identity);
+        // A cache hit at runtime is either an entry already on disk, or one an earlier arm in this
+        // same run will have stored under the same key by the time this arm runs.
+        const cached =
+          options.useCache && (scheduledKeys.has(key) || cache.lookup(identity) !== undefined);
+        if (options.useCache) scheduledKeys.add(key);
         if (cached) {
           armsCached += 1;
           armPlans.push({ arm, cached: true, reused: false, trialsMax: 0, trialsMin: 0 });

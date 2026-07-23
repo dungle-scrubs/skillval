@@ -7,6 +7,7 @@ import type { ExecutorMetadata } from "../src/executors/types.js";
 import type { SeededMember } from "../src/runner.js";
 import { armCacheIdentity, computePlan, seededSkillsForArm } from "../src/runner.js";
 import type { ArmResult, EvalCase } from "../src/types.js";
+import { loadoutHash } from "../src/utils.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -178,6 +179,66 @@ describe("computePlan", () => {
 
     expect(plan.armsCached).toBe(0);
     expect(plan.armsToRun).toBe(1);
+  });
+
+  it("predicts a within-run cache hit for a later arm with an identical identity", () => {
+    // Two skills with byte-identical case content: their baseline arms seed nothing, so they share a
+    // cache identity. A real run stores the first, then reuses it for the second - the plan must too.
+    const sharedCase = makeCase({ arms: ["solo", "baseline"], id: "greet", trials: 1 });
+    const plan = computePlan(
+      [skillInput("a", [sharedCase]), skillInput("b", [sharedCase])],
+      undefined,
+      metadata,
+      createCache(),
+      opts,
+    );
+
+    // solo(a), baseline(a), solo(b) run; baseline(b) reuses baseline(a) as a within-run cache hit.
+    expect(plan.armsToRun).toBe(3);
+    expect(plan.armsCached).toBe(1);
+    expect(plan.trialsMin).toBe(3);
+    const baselineB = plan.skills[1]?.cases[0]?.arms.find((arm) => arm.arm === "baseline");
+    expect(baselineB?.cached).toBe(true);
+  });
+
+  it("does not dedup within-run when the cache is off", () => {
+    const sharedCase = makeCase({ arms: ["solo", "baseline"], id: "greet", trials: 1 });
+    const plan = computePlan(
+      [skillInput("a", [sharedCase]), skillInput("b", [sharedCase])],
+      undefined,
+      metadata,
+      createCache(),
+      { ...opts, useCache: false },
+    );
+
+    expect(plan.armsCached).toBe(0);
+    expect(plan.armsToRun).toBe(4);
+  });
+
+  it("pins the cache identity shape so no field silently drifts", () => {
+    // Non-circular: assert the constructed identity against an explicit object, not a round-trip
+    // through armCacheIdentity itself.
+    const evalCase = makeCase({ id: "c1", trials: 1 });
+    const seeded: SeededMember[] = [
+      { contentHash: "hash-b", directory: "/root/b", name: "b" },
+      { contentHash: "hash-a", directory: "/root/a", name: "a" },
+    ];
+
+    expect(armCacheIdentity("group", evalCase, metadata, "fixhash", "a", seeded)).toEqual({
+      arm: "group",
+      evalCase,
+      executor: metadata,
+      fixtureHash: "fixhash",
+      loadoutHash: loadoutHash(seeded.map((m) => ({ contentHash: m.contentHash, name: m.name }))),
+      triggerTarget: "a",
+    });
+    // Target-absent arms carry no triggerTarget, so their results stay shareable across skills.
+    expect(
+      armCacheIdentity("peers", evalCase, metadata, undefined, "a", seeded).triggerTarget,
+    ).toBeUndefined();
+    expect(
+      armCacheIdentity("baseline", evalCase, metadata, undefined, "a", []).triggerTarget,
+    ).toBeUndefined();
   });
 
   it("counts only the case selected by the case filter", () => {
