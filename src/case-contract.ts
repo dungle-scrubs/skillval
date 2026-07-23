@@ -32,7 +32,8 @@ export const fixtureSchema = Type.ReadonlyObject(
     setup: Type.Optional(
       Type.Readonly(
         Type.Array(nonEmptyStringSchema, {
-          description: "Shell commands run sequentially inside the workspace after the copy.",
+          description:
+            "Shell commands run sequentially inside the workspace after the copy. Trusted case input: arbitrary shell executed on the grading machine (see the README's Trust model section).",
         }),
       ),
     ),

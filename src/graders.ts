@@ -45,7 +45,7 @@ export const commandExitGraderSchema = Type.ReadonlyObject(
   Type.Object({
     command: Type.String({
       description:
-        "Shell command run in the workspace; the grader passes when it exits as expected.",
+        "Shell command run in the workspace; the grader passes when it exits as expected. Trusted case input: this is arbitrary shell executed on the grading machine (see the README's Trust model section).",
       minLength: 1,
       pattern: String.raw`\S`,
     }),
