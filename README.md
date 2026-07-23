@@ -265,16 +265,23 @@ progressive-disclosure standard by having the model `read` a listed skill's SKIL
 invocation is detected from `read` toolCalls targeting `<skill>/SKILL.md` in the transcript.
 The reported model is `defaultProvider/defaultModel` from `~/.pi/settings.json`. pi resolves
 provider API keys from its auth file or environment variables (e.g. `ZAI_API_KEY`) - the key
-must be available in the environment running skillval. Unlike codex, pi has no OS sandbox;
-generation trials rely on the temporary workspace convention alone.
+must be available in the environment running skillval.
 
-Executors never set a model or thinking/effort level; trials inherit the harness defaults the
-user has configured. Each adapter captures both into its identity so results are always
-associated with what actually ran: codex reads `model` and `model_reasoning_effort` from
+Unlike codex (which gets a read-only or `workspace-write` sandbox) and claude (permission modes),
+pi has no OS sandbox: generation trials rely on the temporary-workspace convention alone, with no
+enforced isolation, so an agent's writes are only conventionally scoped to the workspace. Because
+of this, skillval refuses to run pi generation cases unless you pass `--allow-unsandboxed-pi` to
+acknowledge the missing sandbox. Trigger cases are read-only and unaffected. Prefer codex or claude
+for untrusted generation cases.
+
+By default, executors do not set a model or thinking/effort level; trials inherit the harness
+defaults the user has configured, and each adapter captures both into its identity so results are
+always associated with what actually ran: codex reads `model` and `model_reasoning_effort` from
 `~/.codex/config.toml`, claude reads `model` and `effort` from `settings.json`, and pi reads
 `defaultProvider/defaultModel` and `defaultThinkingLevel` from `~/.pi/settings.json`. A missing
-value is recorded as `default` (the provider's own default applies). Changing any of these in
-the provider configuration therefore invalidates the affected cached results.
+value is recorded as `default` (the provider's own default applies). Passing `--model`/`--effort`
+overrides the default for the run, and the override is what gets captured. Changing any of these -
+in the provider configuration or via the flags - therefore keys distinct cached results.
 
 Cached arm results are keyed by runner version, skill content hash, serialized case, arm, executor
 name, executor version, configured model, and configured thinking level. A trial has a 15-minute

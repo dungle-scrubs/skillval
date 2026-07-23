@@ -17,6 +17,7 @@ import { sha256, skillContentHash } from "./utils.js";
 import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
 
 export interface RunOptions {
+  readonly allowUnsandboxedPi: boolean;
   readonly caseFilter: string | undefined;
   readonly effort?: string;
   readonly model?: string;
@@ -70,6 +71,12 @@ export function runEvaluation(
 ): RunOutcome {
   const discovery = discoverSkills(config.roots);
   const selectedSkills = selectSkills(discovery, options.requestedSkills);
+  assertPiGenerationAcknowledged(
+    config.executor,
+    selectedSkills,
+    options.caseFilter,
+    options.allowUnsandboxedPi,
+  );
   const executor = createExecutor(config.executor, {
     effort: options.effort,
     model: options.model,
@@ -121,6 +128,29 @@ export function runEvaluation(
   mkdirSync(reportDirectory, { recursive: true });
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
   return { failures, noops, report, reportPath };
+}
+
+// pi has no OS sandbox, so generation trials run agent writes with no enforced isolation. Refuse
+// them unless the run explicitly acknowledges the gap, failing before any trial spawns.
+export function assertPiGenerationAcknowledged(
+  executorName: string,
+  skills: readonly ReadyDiscoveredSkill[],
+  caseFilter: string | undefined,
+  allow: boolean,
+): void {
+  if (executorName !== "pi" || allow) return;
+  for (const skill of skills) {
+    for (const evalCase of skill.evals.cases) {
+      if (caseFilter !== undefined && evalCase.id !== caseFilter) continue;
+      if (evalCase.mode === "generation") {
+        throw new Error(
+          `pi has no OS sandbox, so generation case "${evalCase.id}" (skill "${skill.name}") would ` +
+            "run agent writes without enforced isolation. Re-run with --allow-unsandboxed-pi to " +
+            "acknowledge, or use codex or claude for generation cases.",
+        );
+      }
+    }
+  }
 }
 
 export function participatingSkillsHash(
