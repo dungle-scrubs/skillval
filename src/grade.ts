@@ -16,8 +16,9 @@ export function gradeTrial(evalCase: EvalCase, arm: Arm, trace: Trace, workspace
   });
 
   if (evalCase.should_trigger !== undefined && arm === "skill") {
+    const evidence = trace.invocationEvidence === null ? "none" : trace.invocationEvidence;
     checks.push({
-      detail: `invoked=${trace.invoked}, expected=${evalCase.should_trigger}`,
+      detail: `invoked=${trace.invoked}, expected=${evalCase.should_trigger}, evidence=${evidence}`,
       name: "trigger",
       pass: trace.invoked === evalCase.should_trigger,
     });

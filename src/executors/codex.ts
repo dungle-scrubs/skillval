@@ -79,6 +79,7 @@ export function detectCodex(realHome = homedir()): ExecutorMetadata {
 export function parseCodexTrace(stdout: string, skillName: string): Trace {
   let completed = false;
   let invoked = false;
+  let invocationEvidence: string | null = null;
   const texts: string[] = [];
   let usage: unknown;
 
@@ -98,6 +99,7 @@ export function parseCodexTrace(stdout: string, skillName: string): Trace {
       item.command.includes(`${skillName}/SKILL.md`)
     ) {
       invoked = true;
+      invocationEvidence ??= `command_execution: ${item.command}`;
     }
     if (
       event.type === "item.completed" &&
@@ -112,5 +114,5 @@ export function parseCodexTrace(stdout: string, skillName: string): Trace {
     }
   }
 
-  return { agentText: texts.join("\n"), completed, invoked, usage };
+  return { agentText: texts.join("\n"), completed, invocationEvidence, invoked, usage };
 }

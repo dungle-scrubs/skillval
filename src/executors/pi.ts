@@ -80,6 +80,7 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
 export function parsePiTrace(stdout: string, skillName: string): Trace {
   let completed = false;
   let invoked = false;
+  let invocationEvidence: string | null = null;
   const texts: string[] = [];
   let usage: unknown;
 
@@ -106,11 +107,13 @@ export function parsePiTrace(stdout: string, skillName: string): Trace {
           JSON.stringify(block.arguments ?? "").includes(`${skillName}/SKILL.md`)
         ) {
           invoked = true;
+          const name = typeof block.name === "string" ? block.name : "toolCall";
+          invocationEvidence ??= `${name} toolCall: ${JSON.stringify(block.arguments ?? null)}`;
         }
       }
       usage = message.usage ?? usage;
     }
   }
 
-  return { agentText: texts.join("\n"), completed, invoked, usage };
+  return { agentText: texts.join("\n"), completed, invocationEvidence, invoked, usage };
 }

@@ -47,6 +47,31 @@ describe("parsePiTrace", () => {
     expect(parsePiTrace(stdout, "planner").invoked).toBe(false);
   });
 
+  it("conformance: records invocation evidence, or null when not triggered", () => {
+    const stdout = agentEnd([
+      {
+        content: [
+          {
+            arguments: { path: "/home/user/skills/orient/SKILL.md" },
+            id: "call_1",
+            name: "read",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    const triggered = parsePiTrace(stdout, "orient");
+    expect(triggered.invoked).toBe(true);
+    expect(triggered.invocationEvidence).toContain("read toolCall");
+    expect(triggered.invocationEvidence).toContain("SKILL.md");
+
+    const notTriggered = parsePiTrace(stdout, "planner");
+    expect(notTriggered.invoked).toBe(false);
+    expect(notTriggered.invocationEvidence).toBeNull();
+  });
+
   it("ignores tool results and user messages when collecting text", () => {
     const stdout = agentEnd([
       { content: [{ text: "file contents here", type: "text" }], role: "user" },
