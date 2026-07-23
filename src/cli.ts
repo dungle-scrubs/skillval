@@ -16,6 +16,7 @@ interface ListOptions {
 }
 
 interface RunCommandOptions {
+  readonly allowUnsandboxedPi?: boolean;
   readonly cache: boolean;
   readonly case?: string;
   readonly effort?: string;
@@ -44,6 +45,10 @@ program
   .option("--effort <level>", "effort/thinking level for the executor to use this run")
   .option("--no-cache", "ignore cached arm results")
   .option("--skip-baseline", "do not run baseline arms")
+  .option(
+    "--allow-unsandboxed-pi",
+    "acknowledge that pi generation trials run without an OS sandbox",
+  )
   .option("--json", "return the complete report as JSON")
   .action((skills: string[], options: RunCommandOptions, command: Command): void => {
     const globalOptions = command.optsWithGlobals() as GlobalOptions & RunCommandOptions;
@@ -52,6 +57,7 @@ program
     const outcome = runEvaluation(
       config,
       {
+        allowUnsandboxedPi: options.allowUnsandboxedPi === true,
         caseFilter: options.case,
         effort: options.effort,
         model: options.model,
