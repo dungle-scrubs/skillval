@@ -13,7 +13,7 @@ import type { ResolvedFixture } from "./fixture.js";
 import { applyFixture, FixtureSetupError, resolveFixture, selectFixture } from "./fixture.js";
 import { gradeTrial } from "./grade.js";
 import type { Arm, ArmResult, CaseResult, EvalCase, TrialResult } from "./types.js";
-import { sha256, skillContentHash } from "./utils.js";
+import { loadoutHash, sha256, skillContentHash } from "./utils.js";
 import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
 
 export interface RunOptions {
@@ -213,12 +213,17 @@ function runCase(
 }
 
 function runArm(context: ArmContext, arm: Arm): ArmResult {
+  // The skill arm seeds the target; the baseline arm seeds nothing. loadoutHash keys the arm on
+  // exactly what it seeds - by name and content - so this stays in step with the seeded set built
+  // in runTrial. A later change seeds a loadout, and this becomes the hash of the whole seeded set.
+  const seededMembers =
+    arm === "skill" ? [{ contentHash: context.skillHash, name: context.skill.name }] : [];
   const identity = {
     arm,
     evalCase: context.evalCase,
     executor: context.executor.metadata,
     fixtureHash: context.fixture?.hash,
-    skillHash: context.skillHash,
+    loadoutHash: loadoutHash(seededMembers),
   };
   if (context.useCache) {
     const hit = context.cache.lookup(identity);

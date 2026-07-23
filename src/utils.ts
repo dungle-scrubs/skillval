@@ -6,6 +6,23 @@ export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+// Order-independent hash of the set of skills seeded in an arm. A set defines an arm, not an
+// ordering, so members are framed then sorted. Each member frames both its name and its content
+// hash, because skills install under their names: two identically-hashed skills with different
+// names are different seeded environments. The count is included so the empty set (the no-skill
+// baseline) is distinct, and every part is length-framed so concatenation is unambiguous.
+export function loadoutHash(
+  members: readonly { readonly contentHash: string; readonly name: string }[],
+): string {
+  const framed = [...members]
+    .map(
+      ({ contentHash, name }) => `${name.length}\0${name}\0${contentHash.length}\0${contentHash}`,
+    )
+    .sort()
+    .join("\0");
+  return sha256(`loadout\0${members.length}\0${framed}`);
+}
+
 // Directories that never contribute to content identity or workspace materialization.
 export const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set([".git", "node_modules"]);
 
