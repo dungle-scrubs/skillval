@@ -5,22 +5,58 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
-import type { Executor, ExecutorMetadata, TrialRequest } from "./types.js";
+import {
+  assertEffortSupported,
+  type Executor,
+  type ExecutorMetadata,
+  type ExecutorOverrides,
+  type TrialRequest,
+} from "./types.js";
 
 const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
+// codex forwards model_reasoning_effort straight to the Responses API without local validation, so
+// these are the API's supported reasoning.effort values. Per-model support is a subset the API
+// enforces itself. Verified against codex 0.145.0 (the API reports this exact set).
+export const CODEX_EFFORT_LEVELS: readonly string[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
 export class CodexExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
+  readonly #overrides: ExecutorOverrides;
   readonly #realHome: string;
 
-  public constructor(realHome = homedir()) {
+  public constructor(overrides: ExecutorOverrides = {}, realHome = homedir()) {
+    assertEffortSupported("codex", overrides.effort, CODEX_EFFORT_LEVELS);
+    this.#overrides = overrides;
     this.#realHome = realHome;
-    this.metadata = detectCodex(realHome);
+    const detected = detectCodex(realHome);
+    this.metadata = {
+      ...detected,
+      model: overrides.model ?? detected.model,
+      thinking: overrides.effort ?? detected.thinking,
+    };
   }
 
   public runTrial(request: TrialRequest): Trace {
     if (request.arm === "skill") seedSkill(request);
     const sandbox = request.evalCase.mode === "generation" ? "workspace-write" : "read-only";
+    // Config overrides take precedence over config.toml, so the chosen model/effort apply to both
+    // arms. The value portion is parsed as TOML, so a JSON-quoted string is a valid TOML string.
+    const selection: string[] = [];
+    if (this.#overrides.model !== undefined) {
+      selection.push("-c", `model=${JSON.stringify(this.#overrides.model)}`);
+    }
+    if (this.#overrides.effort !== undefined) {
+      selection.push("-c", `model_reasoning_effort=${JSON.stringify(this.#overrides.effort)}`);
+    }
     // Baselines need the real Codex configuration for authentication and model selection, but an
     // empty HOME prevents globally installed skills from influencing the comparison arm.
     const environment =
@@ -38,6 +74,7 @@ export class CodexExecutor implements Executor {
         "--json",
         "--skip-git-repo-check",
         "--ephemeral",
+        ...selection,
         "-s",
         sandbox,
         "-C",

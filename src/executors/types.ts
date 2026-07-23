@@ -4,11 +4,33 @@ import type { Arm, EvalCase, Trace } from "../types.js";
 export interface ExecutorMetadata {
   readonly model: string;
   readonly name: string;
-  // The provider-configured thinking/effort level in effect for this run, or "default" when the
-  // provider configuration does not set one. Captured, never controlled: skillval records what
-  // the harness would do so results and cache identity are tied to it.
+  // The thinking/effort level in effect for this run, or "default" when neither an override nor the
+  // provider configuration sets one. When --effort is passed it holds the requested level; otherwise
+  // it records what the harness would do. Either way it is tied to results and cache identity.
   readonly thinking: string;
   readonly version: string;
+}
+
+// Per-run model and effort selection. skillval passes these through to the harness verbatim; each
+// adapter validates the effort against its own vocabulary and applies both to the invocation.
+export interface ExecutorOverrides {
+  readonly effort?: string;
+  readonly model?: string;
+}
+
+// Fail fast, before any trial spawns, when a requested effort is not in an adapter's vocabulary.
+// Model support for a given effort is finer-grained and version-specific, so the harness validates
+// the (model, effort) pair itself; skillval owns only the stable per-adapter effort vocabulary.
+export function assertEffortSupported(
+  executor: string,
+  effort: string | undefined,
+  allowed: readonly string[],
+): void {
+  if (effort !== undefined && !allowed.includes(effort)) {
+    throw new Error(
+      `${executor} does not support effort "${effort}"; valid levels: ${allowed.join(", ")}`,
+    );
+  }
 }
 
 export interface TrialRequest {

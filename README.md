@@ -64,6 +64,14 @@ to select one case, `--no-cache` to ignore cached arm results, `--skip-baseline`
 arms, and `--json` for the complete report. The command exits with status 1 when any selected
 case's skill arm fails.
 
+Use `--model <model>` and `--effort <level>` to pin the executor's model and effort for the run,
+so you can evaluate one skill under, for example, `--model sonnet --effort medium`. Both pass
+through to the configured executor and are recorded in the report and the cache identity, so runs
+at different levels are cached and compared separately. Effort levels are executor-specific and
+validated before the run: `codex` accepts `none, minimal, low, medium, high, xhigh, max`; `claude`
+accepts `low, medium, high, xhigh, max`; `pi` accepts `off, minimal, low, medium, high, xhigh`.
+Model support for a given effort is a subset of these, enforced by the harness itself.
+
 ## Configuration
 
 The configuration follows the [configuration JSON Schema](schemas/config.schema.json):
