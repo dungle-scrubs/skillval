@@ -7,7 +7,7 @@ import type { Arm, ArmResult, EvalCase } from "./types.js";
 import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
-export const RUNNER_VERSION = 10;
+export const RUNNER_VERSION = 11;
 
 export interface ArmCacheIdentity {
   readonly arm: Arm;

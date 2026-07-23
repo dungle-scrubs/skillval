@@ -49,16 +49,16 @@ describe.each([
 });
 
 describe("piSkillArgs", () => {
-  it("emits a repeatable --skill for each seeded skill", () => {
+  it("hides globals and emits a repeatable --skill for each seeded skill", () => {
     expect(
       piSkillArgs([
         { directory: "/skills/alpha", name: "alpha" },
         { directory: "/skills/beta", name: "beta" },
       ]),
-    ).toEqual(["--skill", "/skills/alpha", "--skill", "/skills/beta"]);
+    ).toEqual(["--no-skills", "--skill", "/skills/alpha", "--skill", "/skills/beta"]);
   });
 
-  it("hides skills with --no-skills for the empty (baseline) arm", () => {
+  it("hides all skills with --no-skills for the empty (baseline) arm", () => {
     expect(piSkillArgs([])).toEqual(["--no-skills"]);
   });
 });

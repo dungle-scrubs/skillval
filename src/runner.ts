@@ -174,9 +174,7 @@ function runCase(
   evalCase: EvalCase,
   log: (message: string) => void,
 ): CaseResult {
-  const arms = (evalCase.arms ?? ["skill"]).filter(
-    (arm) => arm === "skill" || !context.skipBaseline,
-  );
+  const arms = (evalCase.arms ?? ["solo"]).filter((arm) => arm === "solo" || !context.skipBaseline);
   // Fixture paths are relative to skillval.yml, which sits in the skill directory.
   const fixture = resolveFixture(
     selectFixture(evalCase.fixture, context.skill.evals.fixture),
@@ -207,17 +205,17 @@ function runCase(
     arms: results,
     id: evalCase.id,
     noop: results.find((result) => result.arm === "baseline")?.pass === true,
-    pass: results.find((result) => result.arm === "skill")?.pass === true,
+    pass: results.find((result) => result.arm === "solo")?.pass === true,
     rule: evalCase.rule,
   };
 }
 
 function runArm(context: ArmContext, arm: Arm): ArmResult {
-  // The skill arm seeds the target; the baseline arm seeds nothing. loadoutHash keys the arm on
+  // The solo arm seeds the target; the baseline arm seeds nothing. loadoutHash keys the arm on
   // exactly what it seeds - by name and content - so this stays in step with the seeded set built
   // in runTrial. A later change seeds a loadout, and this becomes the hash of the whole seeded set.
   const seededMembers =
-    arm === "skill" ? [{ contentHash: context.skillHash, name: context.skill.name }] : [];
+    arm === "solo" ? [{ contentHash: context.skillHash, name: context.skill.name }] : [];
   const identity = {
     arm,
     evalCase: context.evalCase,
@@ -262,10 +260,10 @@ function runTrial(context: ArmContext, arm: Arm): TrialResult {
       arm,
       evalCase: context.evalCase,
       home: trialHome,
-      // The skill arm seeds the target; the baseline arm seeds nothing. A later change seeds a
+      // The solo arm seeds the target; the baseline arm seeds nothing. A later change seeds a
       // loadout here; the adapters already install whatever set they are handed.
       seededSkills:
-        arm === "skill"
+        arm === "solo"
           ? [{ directory: context.skill.skillDirectory, name: context.skill.name }]
           : [],
       skillName: context.skill.name,

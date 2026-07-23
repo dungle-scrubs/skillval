@@ -1,6 +1,13 @@
 /** Implements Claude Code-specific skill seeding, config isolation, invocation, and parsing. */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
@@ -22,7 +29,6 @@ export const CLAUDE_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"
 
 export class ClaudeExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
-  readonly #overrides: ExecutorOverrides;
   readonly #realConfigDirectory: string;
 
   public constructor(
@@ -30,7 +36,6 @@ export class ClaudeExecutor implements Executor {
     realConfigDirectory = defaultConfigDirectory(),
   ) {
     assertEffortSupported("claude", overrides.effort, CLAUDE_EFFORT_LEVELS);
-    this.#overrides = overrides;
     this.#realConfigDirectory = realConfigDirectory;
     const detected = detectClaude(realConfigDirectory);
     this.metadata = {
@@ -42,27 +47,26 @@ export class ClaudeExecutor implements Executor {
 
   public runTrial(request: TrialRequest): Trace {
     seedSkills(request.workspace, request.seededSkills);
-    // claude warns and falls back to the default on an unknown --effort, so skillval validates the
-    // level at construction; here the requested model and effort pass straight through.
+    // Pass the effective model and effort explicitly so a --model/--effort override wins over the
+    // rebuilt settings.json and the trial always runs what metadata reports and caches. metadata
+    // folds in any override; "default" means none was configured, so nothing is passed and Claude's
+    // own default applies (which is what metadata records). Effort is validated at construction.
     const selection: string[] = [];
-    if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);
-    if (this.#overrides.effort !== undefined) selection.push("--effort", this.#overrides.effort);
+    if (this.metadata.model !== "default") selection.push("--model", this.metadata.model);
+    if (this.metadata.thinking !== "default") selection.push("--effort", this.metadata.thinking);
     // Trigger cases stay read-only but must allow the Skill tool itself, or invocation is blocked
     // before it can be observed. Generation cases auto-approve edits inside the workspace.
     const permissions =
       request.evalCase.mode === "generation"
         ? ["--permission-mode", "acceptEdits"]
         : ["--permission-mode", "dontAsk", "--allowedTools", "Read,Glob,Grep,Skill"];
-    // Baselines keep authentication but must not see user-level skills: an empty config
-    // directory hides them (macOS credentials live in the Keychain; elsewhere the credentials
-    // file is copied across so authentication survives the redirect).
-    const environment =
-      request.arm === "baseline"
-        ? {
-            ...process.env,
-            CLAUDE_CONFIG_DIR: prepareBaselineConfig(request.home, this.#realConfigDirectory),
-          }
-        : { ...process.env };
+    // Every arm runs clean: a rebuilt config directory keeps only auth and model/effort settings
+    // (see prepareCleanConfig) and hides the user's skills, plugins, hooks, and permissions, so the
+    // only skills the model sees are the ones seeded into the workspace for this arm.
+    const environment = {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: prepareCleanConfig(request.home, this.#realConfigDirectory),
+    };
     const result = spawnSync(
       "claude",
       [
@@ -106,14 +110,43 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): v
   }
 }
 
-function prepareBaselineConfig(home: string, realConfigDirectory: string): string {
+// Settings keys that select the model and route authentication - safe to carry into a clean run.
+// Everything else (hooks, permissions, enabled plugins, skill config) is behavioral and omitted, so
+// no user configuration can act on one arm differently and skill presence stays the only variable.
+const CLEAN_SETTINGS_KEYS: readonly string[] = ["apiKeyHelper", "effortLevel", "env", "model"];
+
+// A clean config directory holding only the credentials file and a minimal settings.json rebuilt
+// from the allowlisted keys above, so authentication and model/effort selection are preserved while
+// the user's skills, plugins, hooks, and permissions are hidden.
+function prepareCleanConfig(home: string, realConfigDirectory: string): string {
   const configDirectory = join(home, "claude-config");
   mkdirSync(configDirectory, { recursive: true });
   const credentials = join(realConfigDirectory, ".credentials.json");
   if (existsSync(credentials)) {
     copyFileSync(credentials, join(configDirectory, ".credentials.json"));
   }
+  writeFileSync(
+    join(configDirectory, "settings.json"),
+    JSON.stringify(cleanSettings(realConfigDirectory)),
+  );
   return configDirectory;
+}
+
+export function cleanSettings(realConfigDirectory: string): Record<string, unknown> {
+  const minimal: Record<string, unknown> = {};
+  try {
+    const settings: unknown = JSON.parse(
+      readFileSync(join(realConfigDirectory, "settings.json"), "utf8"),
+    );
+    if (isRecord(settings)) {
+      for (const key of CLEAN_SETTINGS_KEYS) {
+        if (settings[key] !== undefined) minimal[key] = settings[key];
+      }
+    }
+  } catch {
+    // No readable settings file; a minimal empty settings file still isolates skills.
+  }
+  return minimal;
 }
 
 export function detectClaude(realConfigDirectory = defaultConfigDirectory()): ExecutorMetadata {
@@ -127,7 +160,8 @@ export function detectClaude(realConfigDirectory = defaultConfigDirectory()): Ex
     );
     if (isRecord(settings)) {
       if (typeof settings.model === "string") model = settings.model;
-      if (typeof settings.effort === "string") thinking = settings.effort;
+      // Claude Code's settings key is effortLevel; the --effort flag maps to it.
+      if (typeof settings.effortLevel === "string") thinking = settings.effortLevel;
     }
   } catch {
     // No readable settings file; the account default model applies.

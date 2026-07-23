@@ -17,7 +17,7 @@ import {
 const classificationSchema = Type.Enum(["capability", "preference"]);
 const nonEmptyStringSchema = Type.String({ minLength: 1, pattern: String.raw`\S` });
 const stringArraySchema = Type.Readonly(Type.Array(Type.String()));
-export const armSchema = Type.Enum(["baseline", "skill"]);
+export const armSchema = Type.Enum(["baseline", "solo"]);
 
 // These schemas are executable at runtime and are also serialized into schemas/ for editor tooling.
 export const fixtureSchema = Type.ReadonlyObject(

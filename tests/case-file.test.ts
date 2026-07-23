@@ -13,7 +13,7 @@ cases:
     type: preference
     rule: enums-as-const
     should_trigger: true
-    arms: [skill, baseline]
+    arms: [solo, baseline]
     prompt: Should I use an enum?
     assert:
       must_match: ["as const"]
@@ -34,7 +34,7 @@ describe("case-file parsing", () => {
     expect(parsed.skill).toBe("standards-typescript");
     expect(parsed.cases).toHaveLength(1);
     expect(parsed.cases[0]).toMatchObject({
-      arms: ["skill", "baseline"],
+      arms: ["solo", "baseline"],
       id: "enum-question",
       mode: "generation",
       rule: "enums-as-const",
