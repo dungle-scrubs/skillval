@@ -5,7 +5,8 @@ import { Command } from "commander";
 import { loadConfig, resolveConfigPath } from "./config.js";
 import type { DiscoveredSkill } from "./discovery.js";
 import { discoverSkills, discoveryReport } from "./discovery.js";
-import { runEvaluation } from "./runner.js";
+import type { ArmPlan, RunPlan } from "./runner.js";
+import { planEvaluation, runEvaluation } from "./runner.js";
 
 interface GlobalOptions {
   readonly config?: string;
@@ -20,6 +21,7 @@ interface RunCommandOptions {
   readonly allowUnsandboxedPi?: boolean;
   readonly cache: boolean;
   readonly case?: string;
+  readonly dryRun?: boolean;
   readonly effort?: string;
   readonly json?: boolean;
   readonly loadout?: string;
@@ -50,6 +52,7 @@ program
     "run group mode against a configured loadout (solo, group, and peers arms)",
   )
   .option("--no-cache", "ignore cached arm results")
+  .option("--dry-run", "report the trials a run would spend against the cache, spawning nothing")
   .option("--skip-baseline", "do not run baseline arms")
   .option(
     "--allow-shell",
@@ -64,21 +67,32 @@ program
     const globalOptions = command.optsWithGlobals() as GlobalOptions & RunCommandOptions;
     const configPath = resolveConfigPath({ cliPath: globalOptions.config });
     const config = loadConfig(configPath);
-    const outcome = runEvaluation(
-      config,
-      {
-        allowShell: options.allowShell === true,
-        allowUnsandboxedPi: options.allowUnsandboxedPi === true,
-        caseFilter: options.case,
-        effort: options.effort,
-        loadout: options.loadout,
-        model: options.model,
-        requestedSkills: skills,
-        skipBaseline: options.skipBaseline === true,
-        useCache: options.cache,
-      },
-      options.json === true ? () => undefined : (message) => console.log(message),
-    );
+    const runOptions = {
+      allowShell: options.allowShell === true,
+      allowUnsandboxedPi: options.allowUnsandboxedPi === true,
+      caseFilter: options.case,
+      effort: options.effort,
+      loadout: options.loadout,
+      model: options.model,
+      requestedSkills: skills,
+      skipBaseline: options.skipBaseline === true,
+      useCache: options.cache,
+    };
+    const quiet =
+      options.json === true ? () => undefined : (message: string) => console.log(message);
+
+    if (options.dryRun === true) {
+      const plan = planEvaluation(config, runOptions, quiet);
+      if (options.json === true) {
+        console.log(JSON.stringify(plan, null, 2));
+      } else {
+        printPlan(plan);
+      }
+      process.exitCode = 0;
+      return;
+    }
+
+    const outcome = runEvaluation(config, runOptions, quiet);
 
     if (options.json === true) {
       console.log(JSON.stringify(outcome.report, null, 2));
@@ -131,6 +145,40 @@ export async function main(): Promise<void> {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   }
+}
+
+function printPlan(plan: RunPlan): void {
+  const executor = plan.executor;
+  console.log(
+    `executor: ${executor.name} ${executor.version} (model ${executor.model}, ` +
+      `thinking ${executor.thinking}, invocation detection ${executor.invocationDetection})`,
+  );
+  console.log("dry run: no trials will be spawned");
+  for (const skill of plan.skills) {
+    console.log(`${skill.name}:`);
+    for (const casePlan of skill.cases) {
+      for (const arm of casePlan.arms) {
+        console.log(`  ${casePlan.id} [${arm.arm}] ${armPlanStatus(arm)}`);
+      }
+    }
+  }
+  console.log(
+    `plan: ${plan.armsToRun} arm(s) to run, ${plan.armsCached} cached, ${plan.armsReused} reused`,
+  );
+  const trials =
+    plan.trialsMin === plan.trialsMax
+      ? `${plan.trialsMin}`
+      : `${plan.trialsMin} (up to ${plan.trialsMax} if arms escalate on disagreement)`;
+  console.log(`trials to run: ${trials}`);
+}
+
+function armPlanStatus(arm: ArmPlan): string {
+  if (arm.reused) return "reused from solo (no peers)";
+  if (arm.cached) return "cached";
+  if (arm.trialsMin === arm.trialsMax) {
+    return `run (${arm.trialsMin} ${arm.trialsMin === 1 ? "trial" : "trials"})`;
+  }
+  return `run (${arm.trialsMin}-${arm.trialsMax} trials)`;
 }
 
 function printSkillTable(skills: readonly DiscoveredSkill[]): void {

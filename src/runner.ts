@@ -2,6 +2,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ArmCacheIdentity } from "./cache.js";
 import { ArmCache } from "./cache.js";
 import type { SkillvalConfig } from "./config.js";
 import { resolveStateDirectory } from "./config.js";
@@ -31,7 +32,7 @@ export interface RunOptions {
 }
 
 // A skill installed for an arm: its name, directory to seed, and content hash for the cache key.
-interface SeededMember {
+export interface SeededMember {
   readonly contentHash: string;
   readonly directory: string;
   readonly name: string;
@@ -45,7 +46,7 @@ interface RunLoadout {
 
 // The skills seeded for one arm. solo seeds the target; baseline seeds nothing; group seeds the
 // loadout plus the target; peers seeds the loadout minus the target.
-function seededSkillsForArm(
+export function seededSkillsForArm(
   arm: RuntimeArm,
   target: SeededMember,
   loadout: readonly SeededMember[],
@@ -89,6 +90,38 @@ export interface RunOutcome {
   readonly noops: number;
   readonly report: RunReport;
   readonly reportPath: string;
+}
+
+// One arm's predicted cost. A cache hit runs nothing (trialsMin/Max 0); a group arm with no peers is
+// reused from solo, so it is neither cached nor run. An uncached arm runs at least its configured
+// trial count and, unless that count is 1 (a single trial can never disagree), may escalate to 5.
+export interface ArmPlan {
+  readonly arm: RuntimeArm;
+  readonly cached: boolean;
+  readonly reused: boolean;
+  readonly trialsMax: number;
+  readonly trialsMin: number;
+}
+
+export interface CasePlan {
+  readonly arms: readonly ArmPlan[];
+  readonly id: string;
+}
+
+export interface SkillPlan {
+  readonly cases: readonly CasePlan[];
+  readonly name: string;
+}
+
+// The result of a dry run: what a real run would spend against the current cache, spawning nothing.
+export interface RunPlan {
+  readonly armsCached: number;
+  readonly armsReused: number;
+  readonly armsToRun: number;
+  readonly executor: ExecutorMetadata;
+  readonly skills: readonly SkillPlan[];
+  readonly trialsMax: number;
+  readonly trialsMin: number;
 }
 
 interface ArmContext {
@@ -198,6 +231,108 @@ export function runEvaluation(
   mkdirSync(reportDirectory, { recursive: true });
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
   return { failures, interferences, noops, report, reportPath };
+}
+
+// Predicts what a real run would spend against the current cache without spawning a single trial, so
+// a large audit is never a blind spend. It resolves the same skills, loadout, executor identity, and
+// fixtures a run would, then does cache lookups only - reusing armsForCase and armCacheIdentity so
+// the prediction and the run key on identical inputs. Execution gates (shell, unsandboxed pi) are not
+// applied: a dry run runs nothing, so it can preview cost even for a suite a real run would refuse.
+export function planEvaluation(
+  config: SkillvalConfig,
+  options: RunOptions,
+  log: (message: string) => void,
+): RunPlan {
+  const discovery = discoverSkills(config.roots);
+  const selectedSkills = selectSkills(discovery, options.requestedSkills);
+  const loadout = resolveRunLoadout(config, options.loadout, discovery, log);
+  const executor = createExecutor(config.executor, {
+    effort: options.effort,
+    model: options.model,
+  });
+  const cache = new ArmCache(resolveStateDirectory());
+  const skillInputs = selectedSkills.map((skill) => ({
+    contentHash: skillContentHash(skill.skillDirectory),
+    skill,
+  }));
+  return computePlan(skillInputs, loadout, executor.metadata, cache, options);
+}
+
+// The pure core of a dry run: given already-resolved skills, loadout, executor identity, and cache,
+// count the trials each arm would run without spawning anything. Split out so it is testable with a
+// temp-dir cache and fake skills, never a live executor. Fixture-free cases touch no disk here.
+export function computePlan(
+  skillInputs: readonly { readonly contentHash: string; readonly skill: ReadyDiscoveredSkill }[],
+  loadout: RunLoadout | undefined,
+  metadata: ExecutorMetadata,
+  cache: ArmCache,
+  options: Pick<RunOptions, "caseFilter" | "skipBaseline" | "useCache">,
+): RunPlan {
+  const groupMode = loadout !== undefined;
+  let armsCached = 0;
+  let armsReused = 0;
+  let armsToRun = 0;
+  let trialsMin = 0;
+  let trialsMax = 0;
+  const skills: SkillPlan[] = [];
+
+  for (const { contentHash, skill } of skillInputs) {
+    // Mirrors runCase: a group arm is reused from solo when the target has no peers in the loadout.
+    const hasPeers = loadout?.members.some((member) => member.name !== skill.name) ?? false;
+    const target: SeededMember = {
+      contentHash,
+      directory: skill.skillDirectory,
+      name: skill.name,
+    };
+    const cases: CasePlan[] = [];
+    for (const evalCase of skill.evals.cases) {
+      if (options.caseFilter !== undefined && evalCase.id !== options.caseFilter) continue;
+      const fixture = resolveFixture(
+        selectFixture(evalCase.fixture, skill.evals.fixture),
+        skill.skillDirectory,
+      );
+      const configured = clampedTrialCount(evalCase.trials);
+      // A single trial can never disagree, so it never escalates; any larger count may reach 5.
+      const maxPerArm = configured === 1 ? 1 : 5;
+      const armPlans: ArmPlan[] = [];
+      for (const arm of armsForCase(evalCase, groupMode, options.skipBaseline)) {
+        if (arm === "group" && !hasPeers) {
+          armsReused += 1;
+          armPlans.push({ arm, cached: false, reused: true, trialsMax: 0, trialsMin: 0 });
+          continue;
+        }
+        const seeded = seededSkillsForArm(arm, target, loadout?.members ?? []);
+        const identity = armCacheIdentity(
+          arm,
+          evalCase,
+          metadata,
+          fixture?.hash,
+          target.name,
+          seeded,
+        );
+        const cached = options.useCache && cache.lookup(identity) !== undefined;
+        if (cached) {
+          armsCached += 1;
+          armPlans.push({ arm, cached: true, reused: false, trialsMax: 0, trialsMin: 0 });
+          continue;
+        }
+        armsToRun += 1;
+        trialsMin += configured;
+        trialsMax += maxPerArm;
+        armPlans.push({
+          arm,
+          cached: false,
+          reused: false,
+          trialsMax: maxPerArm,
+          trialsMin: configured,
+        });
+      }
+      cases.push({ arms: armPlans, id: evalCase.id });
+    }
+    skills.push({ cases, name: skill.name });
+  }
+
+  return { armsCached, armsReused, armsToRun, executor: metadata, skills, trialsMax, trialsMin };
 }
 
 // Resolves the requested loadout to its members and their content hashes, once for the whole run.
@@ -310,17 +445,26 @@ function hasPeerGradedAssertion(evalCase: EvalCase): boolean {
   );
 }
 
+// Which arms a case runs. Group mode runs the three loadout arms for every case, ignoring the case's
+// declared arms; the verdict needs all three. Solo mode keeps the case's arms (default solo; baseline
+// when opted in). Shared by runCase and planEvaluation so the plan mirrors the real run exactly.
+export function armsForCase(
+  evalCase: EvalCase,
+  groupMode: boolean,
+  skipBaseline: boolean,
+): readonly RuntimeArm[] {
+  return groupMode
+    ? ["solo", "group", "peers"]
+    : (evalCase.arms ?? ["solo"]).filter((arm) => arm === "solo" || !skipBaseline);
+}
+
 function runCase(
   context: CaseContext,
   evalCase: EvalCase,
   log: (message: string) => void,
 ): CaseResult {
-  // Group mode runs the three loadout arms for every case, ignoring the case's declared arms; the
-  // verdict needs all three. Solo mode keeps the case's arms (default solo; baseline when opted in).
   const groupMode = context.loadout !== undefined;
-  const arms: readonly RuntimeArm[] = groupMode
-    ? ["solo", "group", "peers"]
-    : (evalCase.arms ?? ["solo"]).filter((arm) => arm === "solo" || !context.skipBaseline);
+  const arms = armsForCase(evalCase, groupMode, context.skipBaseline);
   // When the target has no peers in the loadout (empty, or the target is the only member), the group
   // arm seeds the same set as solo, so it is reused rather than run - two independent nondeterministic
   // runs of an identical environment could otherwise disagree and report false interference.
@@ -391,6 +535,32 @@ function runCase(
   };
 }
 
+// The cache identity for one arm. Shared by runArm and planEvaluation so the trials a dry run
+// predicts and the trials a real run spends key on exactly the same thing - they can never drift.
+export function armCacheIdentity(
+  arm: RuntimeArm,
+  evalCase: EvalCase,
+  metadata: ExecutorMetadata,
+  fixtureHash: string | undefined,
+  targetName: string,
+  seeded: readonly SeededMember[],
+): ArmCacheIdentity {
+  // Target-present arms grade the target-specific trigger check, so key them on the target as well:
+  // a target that is already in the loadout produces the same seeded set (and loadoutHash) as any
+  // other loadout member's group arm, but its trigger result differs.
+  const targetPresent = arm === "solo" || arm === "group";
+  return {
+    arm,
+    evalCase,
+    executor: metadata,
+    fixtureHash,
+    loadoutHash: loadoutHash(
+      seeded.map((member) => ({ contentHash: member.contentHash, name: member.name })),
+    ),
+    triggerTarget: targetPresent ? targetName : undefined,
+  };
+}
+
 function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
   const target: SeededMember = {
     contentHash: context.skillHash,
@@ -400,20 +570,14 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
   // The exact set this arm seeds. loadoutHash keys the arm on it (by name and content), and the
   // same set is handed to runTrial, so the cache key and what actually runs never drift.
   const seeded = seededSkillsForArm(arm, target, context.loadout?.members ?? []);
-  // Target-present arms grade the target-specific trigger check, so key them on the target as well:
-  // a target that is already in the loadout produces the same seeded set (and loadoutHash) as any
-  // other loadout member's group arm, but its trigger result differs.
-  const targetPresent = arm === "solo" || arm === "group";
-  const identity = {
+  const identity = armCacheIdentity(
     arm,
-    evalCase: context.evalCase,
-    executor: context.executor.metadata,
-    fixtureHash: context.fixture?.hash,
-    loadoutHash: loadoutHash(
-      seeded.map((member) => ({ contentHash: member.contentHash, name: member.name })),
-    ),
-    triggerTarget: targetPresent ? target.name : undefined,
-  };
+    context.evalCase,
+    context.executor.metadata,
+    context.fixture?.hash,
+    target.name,
+    seeded,
+  );
   if (context.useCache) {
     const hit = context.cache.lookup(identity);
     if (hit !== undefined) return hit;
