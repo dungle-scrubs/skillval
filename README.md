@@ -12,11 +12,8 @@ nothing.
 
 ## Capability and preference rules
 
-A skill carries two kinds of rule. **Capability** rules teach a model something it does not yet
-reliably do. **Preference** rules express a choice - style, convention, house taste - a model would
-not reach on its own. Most skills mix both. The distinction has teeth because capabilities expire:
-as models are trained on the same information, a capability rule stops changing behavior and turns
-into dead weight. skillval finds those.
+A skill carries two kinds of rules. **Capability** rules teach a model something it does not yet
+reliably do. **Preference** rules express a choice - style, convention, house taste - a model would not reach on its own. Most skills mix both. The distinction matters because capabilities expire: as models are trained on the same information, a capability rule stops changing behavior and turns into dead weight. skillval finds those.
 
 Each case runs with the skill (`solo`) and again without it (`baseline`). Solo-pass with
 baseline-fail means the rule is load-bearing. Solo-pass with baseline-pass means the model already
