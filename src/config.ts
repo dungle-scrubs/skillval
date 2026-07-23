@@ -63,6 +63,7 @@ export function loadConfig(path: string, home = homedir()): SkillvalConfig {
 
   return {
     executor: parsed.executor,
+    ...(parsed.loadouts === undefined ? {} : { loadouts: parsed.loadouts }),
     roots: parsed.roots.map((root) => expandRoot(root, home)),
   };
 }
