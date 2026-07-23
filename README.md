@@ -55,7 +55,7 @@ discovered skills; they only need a `SKILL.md`, not a `skillval.yml`. The verdic
 
 | Arms | Verdict |
 | --- | --- |
-| `solo` pass, `group` **fail** | **interferes with your other skills** |
+| `solo` pass, `group` **fail**, `peers` pass | **interferes with your other skills** |
 | `group` pass, `peers` fail | **works and is needed here** (load-bearing) |
 | `group` pass, `peers` pass | **redundant** - another skill already does it |
 | `solo` fail, `peers` pass | **not needed at all** |
@@ -64,6 +64,13 @@ The raw three arm results stay in the report; the verdict is a derived `loadout`
 combination is reported as `inconclusive`. `should_trigger` is checked on `solo` and `group` (the
 target is present) but never on `peers`. The run summary calls out interference, the way it calls
 out no-ops.
+
+Interference is only attributed to the target when the target's presence is what breaks the case:
+`solo` passes, `group` fails, and `peers` (the loadout minus the target) still passes. If `peers`
+also fails, the loadout breaks the case without the target at all, so the finding is about the other
+skills, not this one - that is left `inconclusive` rather than blamed on the target. (A pure
+trigger-only case has no behavioral check on `peers`, so `solo`-vs-`group` still isolates the target
+and interference stands.)
 
 The `redundant` / `load-bearing` / `not needed` verdicts compare `group` against `peers`, so they
 need an assertion that grades behavior on the `peers` arm (a `must_match`, grader, and so on). A
