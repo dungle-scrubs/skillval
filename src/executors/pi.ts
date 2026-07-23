@@ -10,6 +10,7 @@ import {
   type Executor,
   type ExecutorMetadata,
   type ExecutorOverrides,
+  type SeededSkill,
   type TrialRequest,
 } from "./types.js";
 
@@ -25,6 +26,12 @@ export const PI_EFFORT_LEVELS: readonly string[] = [
   "xhigh",
 ];
 export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "heuristic";
+
+// A repeatable --skill per seeded skill, or --no-skills for the empty (baseline) arm.
+export function piSkillArgs(seededSkills: readonly SeededSkill[]): string[] {
+  if (seededSkills.length === 0) return ["--no-skills"];
+  return seededSkills.flatMap((skill) => ["--skill", skill.directory]);
+}
 
 export class PiExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
@@ -45,10 +52,10 @@ export class PiExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
-    // pi has first-class arm switches: --skill makes the evaluated skill discoverable alongside
-    // the user's normal library (mirroring the other adapters), --no-skills hides every skill
-    // from the baseline. No HOME or config redirection is needed.
-    const arm = request.arm === "skill" ? ["--skill", request.skillDirectory] : ["--no-skills"];
+    // pi has first-class arm switches: --skill (repeatable) makes each seeded skill discoverable
+    // alongside the user's normal library, --no-skills hides every skill for the empty (baseline)
+    // arm. No HOME or config redirection is needed.
+    const arm = piSkillArgs(request.seededSkills);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
     const selection: string[] = [];
     if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);

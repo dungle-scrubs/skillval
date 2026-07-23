@@ -10,6 +10,7 @@ import {
   type Executor,
   type ExecutorMetadata,
   type ExecutorOverrides,
+  type SeededSkill,
   type TrialRequest,
 } from "./types.js";
 
@@ -47,7 +48,7 @@ export class CodexExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
-    if (request.arm === "skill") seedSkill(request);
+    seedSkills(request.workspace, request.seededSkills);
     const sandbox = request.evalCase.mode === "generation" ? "workspace-write" : "read-only";
     // Config overrides take precedence over config.toml, so the chosen model/effort apply to both
     // arms. The value portion is parsed as TOML, so a JSON-quoted string is a valid TOML string.
@@ -97,11 +98,15 @@ export class CodexExecutor implements Executor {
   }
 }
 
-function seedSkill(request: TrialRequest): void {
+export function seedSkills(workspace: string, skills: readonly SeededSkill[]): void {
   // Skill installation paths are provider knowledge and intentionally stay inside this adapter.
-  const skillsRoot = join(request.workspace, ".agents/skills");
+  // An empty list (the baseline arm) seeds nothing, matching the no-skill comparison arm.
+  if (skills.length === 0) return;
+  const skillsRoot = join(workspace, ".agents/skills");
   mkdirSync(skillsRoot, { recursive: true });
-  symlinkSync(request.skillDirectory, join(skillsRoot, request.skillName));
+  for (const skill of skills) {
+    symlinkSync(skill.directory, join(skillsRoot, skill.name));
+  }
 }
 
 export function detectCodex(realHome = homedir()): ExecutorMetadata {

@@ -257,7 +257,12 @@ function runTrial(context: ArmContext, arm: Arm): TrialResult {
       arm,
       evalCase: context.evalCase,
       home: trialHome,
-      skillDirectory: context.skill.skillDirectory,
+      // The skill arm seeds the target; the baseline arm seeds nothing. A later change seeds a
+      // loadout here; the adapters already install whatever set they are handed.
+      seededSkills:
+        arm === "skill"
+          ? [{ directory: context.skill.skillDirectory, name: context.skill.name }]
+          : [],
       skillName: context.skill.name,
       workspace,
     });
