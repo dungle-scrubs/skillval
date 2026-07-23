@@ -6,6 +6,21 @@
       "enum": ["claude", "codex", "pi"],
       "description": "Trial executor."
     },
+    "loadouts": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "uniqueItems": true
+        }
+      },
+      "description": "Named skill sets: loadout name to the skill names it contains."
+    },
     "roots": {
       "type": "array",
       "items": {

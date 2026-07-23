@@ -9,6 +9,18 @@ export const configFileSchema = Type.ReadonlyObject(
     executor: Type.Enum(EXECUTOR_NAMES, {
       description: "Trial executor.",
     }),
+    // Named skill sets for loadout mode: each maps a loadout name to the skill names it contains.
+    loadouts: Type.Optional(
+      Type.Record(
+        Type.String(),
+        Type.Readonly(
+          Type.Array(Type.String({ minLength: 1, pattern: String.raw`\S` }), { uniqueItems: true }),
+        ),
+        {
+          description: "Named skill sets: loadout name to the skill names it contains.",
+        },
+      ),
+    ),
     roots: Type.Readonly(
       Type.Array(Type.String({ minLength: 1, pattern: String.raw`\S` }), {
         description: "Directories whose immediate children are agent skill directories.",
