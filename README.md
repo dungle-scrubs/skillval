@@ -127,8 +127,14 @@ Case fields:
 - `prompt`: the complete trial prompt.
 - `assert.must_match`: JavaScript regular expressions that must match, with the `m` flag.
 - `assert.must_not_match`: JavaScript regular expressions that must not match, with the `m` flag.
-- `assert.graders`: deterministic graders. `tsc` is supported for generation cases. Unknown
-  graders and graders used with an unsupported mode are validation errors.
+- `assert.graders`: parameterless deterministic graders. `tsc` is supported for generation cases.
+  Unknown graders and graders used with an unsupported mode are validation errors.
+- `assert.json_schema`: validates a produced file against a JSON Schema (draft 2020-12), for
+  generation cases. Takes `file` (relative to the workspace) and `schema` (the JSON Schema, an
+  object or boolean). The file must exist inside the workspace, be a regular file, and parse as
+  JSON; a schema mismatch reports the failing instance path. Omit `$schema` or set it to 2020-12;
+  other declared dialects, an escaping `file` path, or a schema that does not compile are validation
+  errors.
 - `trials`: an integer from 1 through 5. Results use a strict majority. If configured trials
   disagree, the arm escalates to 5 trials.
 - `fixture`: optional workspace fixture for this case. It replaces the suite-level `fixture`

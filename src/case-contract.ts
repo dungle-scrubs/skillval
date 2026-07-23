@@ -1,8 +1,16 @@
 /** Defines the case-file contract used for static types, runtime validation, and JSON Schema. */
+
+import { isAbsolute, normalize } from "node:path";
 import type { Static } from "typebox";
 import Type from "typebox";
 import { Check as checkSchema, Errors as schemaErrors } from "typebox/value";
-import { GRADER_NAMES, graderSupportsMode } from "./graders.js";
+import {
+  GRADER_NAMES,
+  graderSupportsMode,
+  JSON_SCHEMA_GRADER_MODES,
+  jsonSchemaCompileError,
+  jsonSchemaGraderSchema,
+} from "./graders.js";
 
 const classificationSchema = Type.Enum(["capability", "preference"]);
 const nonEmptyStringSchema = Type.String({ minLength: 1, pattern: String.raw`\S` });
@@ -35,6 +43,7 @@ export const caseAssertSchema = Type.ReadonlyObject(
     graders: Type.Optional(
       Type.Readonly(Type.Array(Type.Enum(GRADER_NAMES), { uniqueItems: true })),
     ),
+    json_schema: Type.Optional(jsonSchemaGraderSchema),
     must_match: Type.Optional(stringArraySchema),
     must_not_match: Type.Optional(stringArraySchema),
   }),
@@ -125,8 +134,33 @@ export function parseCaseValue(value: unknown, path: string, expectedSkill?: str
     ids.add(evalCase.id);
     validatePatterns(evalCase, path);
     validateGraders(evalCase, path);
+    validateJsonSchemaGrader(evalCase, path);
   }
   return value;
+}
+
+function validateJsonSchemaGrader(evalCase: EvalCase, path: string): void {
+  const config = evalCase.assert?.json_schema;
+  if (config === undefined) return;
+  if (!JSON_SCHEMA_GRADER_MODES.includes(evalCase.mode)) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" grader "json_schema" does not support ${evalCase.mode} mode`,
+    );
+  }
+  // Reject parent traversal by path segment, not string prefix, so a legitimate filename such as
+  // "..config.json" is allowed while "../x" is not.
+  const segments = normalize(config.file).split(/[/\\]/);
+  if (isAbsolute(config.file) || segments.includes("..")) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" json_schema file "${config.file}" must be a path inside the workspace`,
+    );
+  }
+  const schemaError = jsonSchemaCompileError(config.schema);
+  if (schemaError !== null) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" has an invalid json_schema: ${schemaError}`,
+    );
+  }
 }
 
 function validateGraders(evalCase: EvalCase, path: string): void {
