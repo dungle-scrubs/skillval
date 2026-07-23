@@ -18,6 +18,25 @@
           "assert": {
             "type": "object",
             "properties": {
+              "command_exit": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Shell command run in the workspace; the grader passes when it exits as expected.",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "expect": {
+                    "type": "integer",
+                    "description": "Exit code the command must produce to pass. Defaults to 0.",
+                    "maximum": 255,
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
               "graders": {
                 "type": "array",
                 "items": {

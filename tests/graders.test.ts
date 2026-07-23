@@ -181,3 +181,50 @@ describe("json_schema grader", () => {
     expect(runGraders({}, workspace)).toHaveLength(0);
   });
 });
+
+describe("command_exit grader", () => {
+  it("passes when the command exits with the default expected code 0", () => {
+    const workspace = makeWorkspace({ "out.json": "{}" });
+
+    const [check] = runGraders(
+      { assert: { command_exit: { command: "test -f out.json" } } },
+      workspace,
+    );
+
+    expect(check).toMatchObject({ name: "command_exit", pass: true });
+  });
+
+  it("fails when the command exits with an unexpected code", () => {
+    const workspace = makeWorkspace({});
+
+    const [check] = runGraders(
+      { assert: { command_exit: { command: "test -f missing.json" } } },
+      workspace,
+    );
+
+    expect(check?.pass).toBe(false);
+    expect(check?.detail).toContain("expected 0");
+  });
+
+  it("passes when the actual exit code matches a non-zero expected code", () => {
+    const workspace = makeWorkspace({});
+
+    const [check] = runGraders(
+      { assert: { command_exit: { command: "exit 3", expect: 3 } } },
+      workspace,
+    );
+
+    expect(check).toMatchObject({ name: "command_exit", pass: true });
+  });
+
+  it("runs the command inside the workspace", () => {
+    const workspace = makeWorkspace({ "produced.txt": "hello" });
+
+    const [check] = runGraders(
+      { assert: { command_exit: { command: "grep -q hello produced.txt" } } },
+      workspace,
+    );
+
+    expect(check?.pass).toBe(true);
+  });
+});

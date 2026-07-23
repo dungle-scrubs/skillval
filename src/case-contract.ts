@@ -5,6 +5,8 @@ import type { Static } from "typebox";
 import Type from "typebox";
 import { Check as checkSchema, Errors as schemaErrors } from "typebox/value";
 import {
+  COMMAND_EXIT_GRADER_MODES,
+  commandExitGraderSchema,
   GRADER_NAMES,
   graderSupportsMode,
   JSON_SCHEMA_GRADER_MODES,
@@ -40,6 +42,7 @@ export const fixtureSchema = Type.ReadonlyObject(
 
 export const caseAssertSchema = Type.ReadonlyObject(
   Type.Object({
+    command_exit: Type.Optional(commandExitGraderSchema),
     graders: Type.Optional(
       Type.Readonly(Type.Array(Type.Enum(GRADER_NAMES), { uniqueItems: true })),
     ),
@@ -135,8 +138,18 @@ export function parseCaseValue(value: unknown, path: string, expectedSkill?: str
     validatePatterns(evalCase, path);
     validateGraders(evalCase, path);
     validateJsonSchemaGrader(evalCase, path);
+    validateCommandExitGrader(evalCase, path);
   }
   return value;
+}
+
+function validateCommandExitGrader(evalCase: EvalCase, path: string): void {
+  if (evalCase.assert?.command_exit === undefined) return;
+  if (!COMMAND_EXIT_GRADER_MODES.includes(evalCase.mode)) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" grader "command_exit" does not support ${evalCase.mode} mode`,
+    );
+  }
 }
 
 function validateJsonSchemaGrader(evalCase: EvalCase, path: string): void {

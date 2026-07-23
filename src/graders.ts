@@ -39,8 +39,35 @@ export type JsonSchemaGraderConfig = Static<typeof jsonSchemaGraderSchema>;
 // The json_schema grader supports only generation cases, mirroring the produced-file graders.
 export const JSON_SCHEMA_GRADER_MODES: readonly CaseMode[] = ["generation"];
 
+// The command_exit grader runs a case-authored command in the workspace and grades on exit code.
+// The command comes from the case file, the same trust level as fixture setup commands.
+export const commandExitGraderSchema = Type.ReadonlyObject(
+  Type.Object({
+    command: Type.String({
+      description:
+        "Shell command run in the workspace; the grader passes when it exits as expected.",
+      minLength: 1,
+      pattern: String.raw`\S`,
+    }),
+    expect: Type.Optional(
+      Type.Integer({
+        description: "Exit code the command must produce to pass. Defaults to 0.",
+        maximum: 255,
+        minimum: 0,
+      }),
+    ),
+  }),
+  { additionalProperties: false },
+);
+
+export type CommandExitGraderConfig = Static<typeof commandExitGraderSchema>;
+
+// The command_exit grader supports only generation cases, mirroring the produced-file graders.
+export const COMMAND_EXIT_GRADER_MODES: readonly CaseMode[] = ["generation"];
+
 interface GradableCase {
   readonly assert?: {
+    readonly command_exit?: CommandExitGraderConfig;
     readonly graders?: readonly GraderName[];
     readonly json_schema?: JsonSchemaGraderConfig;
   };
@@ -77,15 +104,70 @@ export function graderSupportsMode(name: GraderName, mode: CaseMode): boolean {
 
 export function runGraders(evalCase: GradableCase, workspace: string): readonly GraderCheck[] {
   const checks: GraderCheck[] = [];
-  // Non-mutating graders run first: gradeTsc injects package.json/tsconfig.json, so json_schema
-  // must read produced files before tsc can create or overwrite them.
+  // Graders run least-mutating first: json_schema only reads, command_exit may write, and gradeTsc
+  // injects package.json/tsconfig.json. Reading produced files before any grader can rewrite them
+  // keeps a combined case deterministic.
   if (evalCase.assert?.json_schema !== undefined) {
     checks.push(gradeJsonSchema(workspace, evalCase.assert.json_schema));
+  }
+  if (evalCase.assert?.command_exit !== undefined) {
+    checks.push(gradeCommandExit(workspace, evalCase.assert.command_exit));
   }
   for (const name of evalCase.assert?.graders ?? []) {
     checks.push(graders[name].run(workspace));
   }
   return checks;
+}
+
+const COMMAND_EXIT_TIMEOUT_MS = 120_000;
+
+function gradeCommandExit(workspace: string, config: CommandExitGraderConfig): GraderCheck {
+  const expected = config.expect ?? 0;
+  // Minimal environment and SIGKILL on timeout mirror fixture setup: nothing inherited beyond PATH,
+  // a throwaway HOME, and a hard kill because SIGTERM is trappable and would let a hang run forever.
+  // A large maxBuffer keeps a verbose compiler or test runner from being killed with ENOBUFS, which
+  // would fail the check regardless of exit code. Like fixture setup, a timed-out command that
+  // spawned background descendants may leave them running; grading commands are trusted case input.
+  const outcome = spawnSync(config.command, {
+    cwd: workspace,
+    encoding: "utf8",
+    env: { HOME: workspace, PATH: process.env.PATH ?? "" },
+    killSignal: "SIGKILL",
+    maxBuffer: 64 * 1024 * 1024,
+    shell: true,
+    timeout: COMMAND_EXIT_TIMEOUT_MS,
+  });
+  if (outcome.error !== undefined) {
+    const timedOut = (outcome.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+    const reason = timedOut
+      ? `timed out after ${COMMAND_EXIT_TIMEOUT_MS / 1000}s`
+      : outcome.error.message;
+    return {
+      detail: `command "${config.command}" failed to run: ${reason}`,
+      name: "command_exit",
+      pass: false,
+    };
+  }
+  if (outcome.signal !== null) {
+    return {
+      detail: `command "${config.command}" terminated by ${outcome.signal}`,
+      name: "command_exit",
+      pass: false,
+    };
+  }
+  if (outcome.status === expected) {
+    return {
+      detail: `command "${config.command}" exited ${expected}`,
+      name: "command_exit",
+      pass: true,
+    };
+  }
+  const stderr = outcome.stderr === "" ? "" : `: ${outcome.stderr.slice(0, 300)}`;
+  return {
+    detail: `command "${config.command}" exited ${outcome.status}, expected ${expected}${stderr}`,
+    name: "command_exit",
+    pass: false,
+  };
 }
 
 type CompileResult = { ok: true; validate: ValidateFunction } | { message: string; ok: false };
