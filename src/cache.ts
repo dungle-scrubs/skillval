@@ -7,14 +7,16 @@ import type { Arm, ArmResult, EvalCase } from "./types.js";
 import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
-export const RUNNER_VERSION = 9;
+export const RUNNER_VERSION = 10;
 
 export interface ArmCacheIdentity {
   readonly arm: Arm;
   readonly evalCase: EvalCase;
   readonly executor: ExecutorMetadata;
   readonly fixtureHash?: string;
-  readonly skillHash: string;
+  // Order-independent hash of the set of skills seeded in this arm (see loadoutHash). The empty
+  // baseline hashes an empty set, so it stays independent of any skill's content.
+  readonly loadoutHash: string;
 }
 
 export class ArmCache {
@@ -37,14 +39,13 @@ export class ArmCache {
   }
 
   #path(identity: ArmCacheIdentity): string {
-    // Every input that can change an arm result belongs in this identity. The baseline arm never
-    // installs the skill, so its result cannot depend on skill content; excluding the skill hash
-    // from the baseline key lets a baseline result survive skill edits, roughly halving recompute
-    // on the iterate-a-skill-and-re-run loop.
-    const skillComponent = identity.arm === "skill" ? identity.skillHash : "";
+    // Every input that can change an arm result belongs in this identity. loadoutHash captures the
+    // exact set of skills seeded in this arm, so an arm's key changes precisely when its membership
+    // or a member's content changes - and the empty baseline (no skills seeded) stays independent
+    // of any skill's content, which is why editing a skill never busts its baseline.
     const parts = [
       String(RUNNER_VERSION),
-      skillComponent,
+      identity.loadoutHash,
       JSON.stringify(identity.evalCase),
       identity.arm,
       identity.executor.name,
