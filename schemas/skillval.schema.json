@@ -24,7 +24,7 @@
                 "properties": {
                   "command": {
                     "type": "string",
-                    "description": "Shell command run in the workspace; the grader passes when it exits as expected.",
+                    "description": "Shell command run in the workspace; the grader passes when it exits as expected. Trusted case input: this is arbitrary shell executed on the grading machine (see the README's Trust model section).",
                     "minLength": 1,
                     "pattern": "\\S"
                   },
@@ -102,7 +102,7 @@
                   "minLength": 1,
                   "pattern": "\\S"
                 },
-                "description": "Shell commands run sequentially inside the workspace after the copy."
+                "description": "Shell commands run sequentially inside the workspace after the copy. Trusted case input: arbitrary shell executed on the grading machine (see the README's Trust model section)."
               }
             },
             "additionalProperties": false,
@@ -158,7 +158,7 @@
             "minLength": 1,
             "pattern": "\\S"
           },
-          "description": "Shell commands run sequentially inside the workspace after the copy."
+          "description": "Shell commands run sequentially inside the workspace after the copy. Trusted case input: arbitrary shell executed on the grading machine (see the README's Trust model section)."
         }
       },
       "additionalProperties": false,

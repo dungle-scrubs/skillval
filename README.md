@@ -119,6 +119,25 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 exists, and a `missing`, `invalid`, or `ready` status in JSON output. Invalid case files include a
 validation error. Discovery only requires `SKILL.md`; evaluation requires a valid `skillval.yml`.
 
+## Trust model
+
+A `skillval.yml` is executable input, not passive configuration. Two fields run case-authored
+shell commands directly on the machine that grades the suite:
+
+- fixture `setup` commands, before the trial's agent runs;
+- `assert.command_exit`, at grading time.
+
+Both run with a minimal environment - only `PATH` is inherited, and `HOME` points at a throwaway
+trial directory - and are killed on timeout, but that is scoping, not a sandbox: nothing prevents
+a command from reading or writing anything your user account can reach. Evaluating a skill
+therefore means trusting its `skillval.yml` exactly as you would trust running its Makefile or
+npm scripts. Review the case file before running a suite from a repository you do not control.
+
+The agent trials themselves are a separate boundary, sandboxed per executor (see
+[Executors](#executors)): codex trials get an OS sandbox, claude trials get permission modes, and
+pi generation trials have no sandbox at all and must be acknowledged with
+`--allow-unsandboxed-pi`.
+
 ## Case files
 
 Only a file named `skillval.yml` next to `SKILL.md` is recognized. There is no `evals.yml`
@@ -158,8 +177,9 @@ Case fields:
   errors.
 - `assert.command_exit`: runs a shell command in the workspace and passes when it exits with the
   expected code, for generation cases. Takes `command` and optional `expect` (default `0`). The
-  command is case-authored, the same trust level as fixture `setup`; it runs with a minimal
-  environment and is killed after 120 seconds. This is the language-agnostic grader: run a
+  command is case-authored arbitrary shell, the same trust level as fixture `setup` (see
+  [Trust model](#trust-model)); it runs with a minimal environment and is killed after
+  120 seconds. This is the language-agnostic grader: run a
   compiler, test runner, or validator over produced files in any language. Used in a non-generation
   case it is a validation error.
 - `trials`: an integer from 1 through 5. Results use a strict majority. If configured trials
@@ -183,8 +203,9 @@ two fields, and at least one is required:
   directory, and it may not contain symbolic links (create links with `setup` commands instead);
   anything else is a validation error at load time.
 - `setup`: shell commands run sequentially inside the workspace after the copy, with a minimal
-  environment (`PATH` plus a throwaway `HOME`). A non-zero exit fails the trial with a
-  `fixture-setup` error before the agent runs; it is never a grading failure. Each command's
+  environment (`PATH` plus a throwaway `HOME`). These are case-authored arbitrary shell commands
+  executed on the grading machine (see [Trust model](#trust-model)). A non-zero exit fails the
+  trial with a `fixture-setup` error before the agent runs; it is never a grading failure. Each command's
   stdout and stderr are captured into the trial record.
 
 A suite-level `fixture` applies to every case; a case-level `fixture` replaces it entirely.
