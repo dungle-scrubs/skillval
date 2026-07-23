@@ -10,6 +10,7 @@ import {
   type Executor,
   type ExecutorMetadata,
   type ExecutorOverrides,
+  type SeededSkill,
   type TrialRequest,
 } from "./types.js";
 
@@ -40,7 +41,7 @@ export class ClaudeExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
-    if (request.arm === "skill") seedSkill(request);
+    seedSkills(request.workspace, request.seededSkills);
     // claude warns and falls back to the default on an unknown --effort, so skillval validates the
     // level at construction; here the requested model and effort pass straight through.
     const selection: string[] = [];
@@ -94,11 +95,15 @@ function defaultConfigDirectory(): string {
   return process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 }
 
-function seedSkill(request: TrialRequest): void {
+export function seedSkills(workspace: string, skills: readonly SeededSkill[]): void {
   // Skill installation paths are provider knowledge and intentionally stay inside this adapter.
-  const skillsRoot = join(request.workspace, ".claude/skills");
+  // An empty list (the baseline arm) seeds nothing, matching the no-skill comparison arm.
+  if (skills.length === 0) return;
+  const skillsRoot = join(workspace, ".claude/skills");
   mkdirSync(skillsRoot, { recursive: true });
-  symlinkSync(request.skillDirectory, join(skillsRoot, request.skillName));
+  for (const skill of skills) {
+    symlinkSync(skill.directory, join(skillsRoot, skill.name));
+  }
 }
 
 function prepareBaselineConfig(home: string, realConfigDirectory: string): string {

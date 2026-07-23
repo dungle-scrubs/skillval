@@ -37,11 +37,20 @@ export function assertEffortSupported(
   }
 }
 
+// A skill to install for a trial: its discovery name and the directory holding its SKILL.md.
+export interface SeededSkill {
+  readonly directory: string;
+  readonly name: string;
+}
+
 export interface TrialRequest {
   readonly arm: Arm;
   readonly evalCase: EvalCase;
   readonly home: string;
-  readonly skillDirectory: string;
+  // Every skill made discoverable for this arm. The skill arm seeds the target; the baseline arm
+  // seeds none. Loadout mode seeds a set. Adapters install exactly this list and nothing else.
+  readonly seededSkills: readonly SeededSkill[];
+  // The target skill under test, used for trigger detection regardless of what else is seeded.
   readonly skillName: string;
   readonly workspace: string;
 }
