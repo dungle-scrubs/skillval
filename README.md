@@ -33,6 +33,46 @@ Cases can record which kind they exercise with the `type` field (`capability` or
 `should_trigger`, when set, is checked only on arms where the skill under test is present (`solo`),
 never on `baseline`, where it is absent by design.
 
+## Group mode
+
+Solo mode measures a skill in isolation - the skill alone versus nothing. Group mode measures its
+marginal effect **inside a set of other skills**, which is closer to how skills are used in
+practice, and it surfaces interference that isolation cannot see.
+
+Define named loadouts in the configuration, then pass `--loadout <name>`:
+
+```yaml
+# config.yml
+loadouts:
+  everyday: [commit-style, naming, imports]
+```
+
+```sh
+skillval run typescript-style --loadout everyday
+```
+
+Group mode runs three arms per case (ignoring the case's `arms` field, since the verdict needs all
+three): `solo` (the target alone), `group` (the loadout plus the target), and `peers` (the loadout
+minus the target). Every arm runs clean, differing only by its seeded set. Loadout members must be
+discovered skills; they only need a `SKILL.md`, not a `skillval.yml`. The verdict per case:
+
+| Arms | Verdict |
+| --- | --- |
+| `solo` pass, `group` **fail** | **interferes with your other skills** |
+| `group` pass, `peers` fail | **works and is needed here** (load-bearing) |
+| `group` pass, `peers` pass | **redundant** - another skill already does it |
+| `solo` fail, `peers` pass | **not needed at all** |
+
+The raw three arm results stay in the report; the verdict is a derived `loadout` block. Any other
+combination is reported as `inconclusive`. `should_trigger` is checked on `solo` and `group` (the
+target is present) but never on `peers`. The run summary calls out interference, the way it calls
+out no-ops.
+
+The `redundant` / `load-bearing` / `not needed` verdicts compare `group` against `peers`, so they
+need an assertion that grades behavior on the `peers` arm (a `must_match`, grader, and so on). A
+pure trigger-only case - `should_trigger` and nothing else - has no such check on `peers` (the
+trigger check is target-specific), so it is reported `inconclusive` unless it shows interference.
+
 ## Install
 
 ```sh
@@ -113,6 +153,9 @@ executor: codex
 `roots` contains directories whose immediate children have the form `<skill>/SKILL.md`. Both `~`
 and `$HOME` are expanded. `executor` selects the trial adapter: `codex`, `claude`, or `pi`. Missing roots are skipped during `run`; `list` returns them in
 `missingRoots` with JSON output and prints each as `missing root: <path>` in human output.
+
+`loadouts` (optional) defines named skill sets for [group mode](#group-mode): a map from a loadout
+name to the discovered skill names it contains. Select one with `--loadout <name>`.
 
 Configuration path precedence is:
 

@@ -61,6 +61,7 @@ describe("arm cache", () => {
     ["model", { ...identity, executor: { ...identity.executor, model: "model-b" } }],
     ["thinking level", { ...identity, executor: { ...identity.executor, thinking: "high" } }],
     ["fixture hash", { ...identity, fixtureHash: "fixture-hash" }],
+    ["trigger target", { ...identity, triggerTarget: "some-target" }],
   ])("invalidates when %s changes", (_field, changedIdentity) => {
     const cache = createCache();
     cache.store(identity, result);
@@ -94,6 +95,19 @@ describe("arm cache", () => {
     expect(readFileSync(join(directory, "cache", `${legacyKey}.json`), "utf8")).toBe(
       JSON.stringify(result),
     );
+  });
+
+  it("keys group arms of different targets separately even with an identical seeded set", () => {
+    const cache = createCache();
+    // Two targets both in the same loadout produce the same loadoutHash for their group arm; the
+    // trigger target must still separate them so one target's result is never reused for another.
+    const groupA: ArmCacheIdentity = { ...identity, arm: "group", triggerTarget: "skill-a" };
+    const groupB: ArmCacheIdentity = { ...identity, arm: "group", triggerTarget: "skill-b" };
+
+    cache.store(groupA, { ...result, arm: "group" });
+
+    expect(cache.lookup(groupA)).toBeDefined();
+    expect(cache.lookup(groupB)).toBeUndefined();
   });
 
   it("invalidates a fixture-backed arm when one fixture file byte changes", () => {

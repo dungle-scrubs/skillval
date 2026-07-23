@@ -1,5 +1,5 @@
 /** Defines the provider-neutral seam between trial orchestration and executor adapters. */
-import type { Arm, EvalCase, Trace } from "../types.js";
+import type { EvalCase, RuntimeArm, Trace } from "../types.js";
 
 export interface ExecutorMetadata {
   // Records how the adapter decides the invoked trigger signal: "structured" means a dedicated
@@ -44,7 +44,7 @@ export interface SeededSkill {
 }
 
 export interface TrialRequest {
-  readonly arm: Arm;
+  readonly arm: RuntimeArm;
   readonly evalCase: EvalCase;
   readonly home: string;
   // Every skill made discoverable for this arm. The skill arm seeds the target; the baseline arm

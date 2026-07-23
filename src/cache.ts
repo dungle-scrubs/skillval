@@ -3,20 +3,26 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveStateDirectory } from "./config.js";
 import type { ExecutorMetadata } from "./executors/types.js";
-import type { Arm, ArmResult, EvalCase } from "./types.js";
+import type { ArmResult, EvalCase, RuntimeArm } from "./types.js";
 import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
-export const RUNNER_VERSION = 11;
+export const RUNNER_VERSION = 12;
 
 export interface ArmCacheIdentity {
-  readonly arm: Arm;
+  readonly arm: RuntimeArm;
   readonly evalCase: EvalCase;
   readonly executor: ExecutorMetadata;
   readonly fixtureHash?: string;
   // Order-independent hash of the set of skills seeded in this arm (see loadoutHash). The empty
   // baseline hashes an empty set, so it stays independent of any skill's content.
   readonly loadoutHash: string;
+  // The target skill whose invocation should_trigger grades, set only for target-present arms
+  // (solo, group). It disambiguates the group arms of two different targets that are both members
+  // of the same loadout - their seeded sets, and so their loadoutHash, are identical, but the
+  // target-specific trigger check is not. Omitted for baseline and peers, which do not grade the
+  // target, so their results stay shareable across skills.
+  readonly triggerTarget?: string;
 }
 
 export class ArmCache {
@@ -53,8 +59,10 @@ export class ArmCache {
       identity.executor.model,
       identity.executor.thinking,
     ];
-    // Appended conditionally so fixture-free identities keep their historical keys.
-    if (identity.fixtureHash !== undefined) parts.push(identity.fixtureHash);
+    // Appended conditionally and framed so fixture-free, single-arm identities keep stable keys and
+    // a skill name can never be mistaken for a fixture hash.
+    if (identity.fixtureHash !== undefined) parts.push(`fixture\0${identity.fixtureHash}`);
+    if (identity.triggerTarget !== undefined) parts.push(`target\0${identity.triggerTarget}`);
     const key = sha256(parts.join("\0"));
     return join(this.#stateDirectory, "cache", `${key}.json`);
   }

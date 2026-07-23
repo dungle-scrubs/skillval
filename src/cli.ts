@@ -21,6 +21,7 @@ interface RunCommandOptions {
   readonly case?: string;
   readonly effort?: string;
   readonly json?: boolean;
+  readonly loadout?: string;
   readonly model?: string;
   readonly skipBaseline?: boolean;
 }
@@ -43,6 +44,10 @@ program
   .option("--case <id>", "run only the case with this id")
   .option("--model <model>", "model for the executor to use this run")
   .option("--effort <level>", "effort/thinking level for the executor to use this run")
+  .option(
+    "--loadout <name>",
+    "run group mode against a configured loadout (solo, group, and peers arms)",
+  )
   .option("--no-cache", "ignore cached arm results")
   .option("--skip-baseline", "do not run baseline arms")
   .option(
@@ -60,6 +65,7 @@ program
         allowUnsandboxedPi: options.allowUnsandboxedPi === true,
         caseFilter: options.case,
         effort: options.effort,
+        loadout: options.loadout,
         model: options.model,
         requestedSkills: skills,
         skipBaseline: options.skipBaseline === true,
@@ -73,7 +79,14 @@ program
     } else {
       console.log(`report: ${outcome.reportPath}`);
       if (outcome.noops > 0) {
-        console.log(`no-op alert: ${outcome.noops} case(s) pass at baseline - prune candidates`);
+        console.log(
+          `no-op alert: ${outcome.noops} case(s) pass without the skill - prune candidates`,
+        );
+      }
+      if (outcome.interferences > 0) {
+        console.log(
+          `interference alert: ${outcome.interferences} case(s) work alone but the loadout breaks them`,
+        );
       }
       console.log(
         outcome.failures === 0 ? "all cases passed" : `${outcome.failures} case(s) FAILED`,
