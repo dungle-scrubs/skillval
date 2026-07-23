@@ -11,6 +11,10 @@ export interface LoadoutMember {
 export interface ResolvedLoadout {
   readonly members: readonly LoadoutMember[];
   readonly name: string;
+  // Non-fatal notices for the caller to surface, one per member name that matched more than one
+  // discovered skill. Resolution still proceeds with the first match; the warning names what won and
+  // what was shadowed so a silent collision never decides membership unseen.
+  readonly warnings: readonly string[];
 }
 
 export class LoadoutError extends Error {
@@ -42,18 +46,35 @@ export function resolveLoadout(
     throw new LoadoutError(`unknown loadout "${name}"; ${suffix}`);
   }
 
-  const byName = new Map<string, DiscoveredSkill>();
+  // Every discovered skill per name, in discovery order, so a member that matches more than one can
+  // be surfaced. The first match still wins, preserving prior first-match-wins behavior exactly.
+  const byName = new Map<string, DiscoveredSkill[]>();
   for (const skill of discovery.skills) {
-    if (!byName.has(skill.name)) byName.set(skill.name, skill);
+    const matches = byName.get(skill.name);
+    if (matches === undefined) byName.set(skill.name, [skill]);
+    else matches.push(skill);
   }
 
+  const warnings: string[] = [];
   const members = memberNames.map((member): LoadoutMember => {
-    const skill = byName.get(member);
-    if (skill === undefined) {
+    const matches = byName.get(member);
+    if (matches === undefined || matches.length === 0) {
       throw new LoadoutError(`loadout "${name}" member "${member}" is not a discovered skill`);
     }
-    return { directory: skill.skillDirectory, name: skill.name };
+    const [winner, ...shadowed] = matches;
+    if (winner === undefined) {
+      throw new LoadoutError(`loadout "${name}" member "${member}" is not a discovered skill`);
+    }
+    if (shadowed.length > 0) {
+      warnings.push(
+        `loadout "${name}" member "${member}" matches ${matches.length} discovered skills; ` +
+          `using ${winner.skillDirectory}, ignoring ${shadowed
+            .map((skill) => skill.skillDirectory)
+            .join(", ")}`,
+      );
+    }
+    return { directory: winner.skillDirectory, name: winner.name };
   });
 
-  return { members, name };
+  return { members, name, warnings };
 }

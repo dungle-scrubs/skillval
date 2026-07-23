@@ -3,20 +3,20 @@ import type { SkillvalConfig } from "../src/config.js";
 import type { DiscoveredSkill, DiscoveryResult } from "../src/discovery.js";
 import { LoadoutError, resolveLoadout } from "../src/loadout.js";
 
-const readySkill = (name: string): DiscoveredSkill =>
+const readySkill = (name: string, root = "/root"): DiscoveredSkill =>
   ({
     caseCount: 0,
     class: "preference",
     hasSkillval: true,
     name,
-    root: "/root",
-    skillDirectory: `/root/${name}`,
+    root,
+    skillDirectory: `${root}/${name}`,
     status: "ready",
   }) as DiscoveredSkill;
 
 const discovery = (names: string[]): DiscoveryResult => ({
   missingRoots: [],
-  skills: names.map(readySkill),
+  skills: names.map((name) => readySkill(name)),
 });
 
 const config = (loadouts: Record<string, string[]>): SkillvalConfig => ({
@@ -39,7 +39,31 @@ describe("resolveLoadout", () => {
         { directory: "/root/beta", name: "beta" },
       ],
       name: "everyday",
+      warnings: [],
     });
+  });
+
+  it("warns and keeps the first match when a member name collides across roots", () => {
+    const resolved = resolveLoadout(config({ everyday: ["alpha"] }), "everyday", {
+      missingRoots: [],
+      skills: [readySkill("alpha", "/root-a"), readySkill("alpha", "/root-b")],
+    });
+
+    expect(resolved.members).toEqual([{ directory: "/root-a/alpha", name: "alpha" }]);
+    expect(resolved.warnings).toEqual([
+      'loadout "everyday" member "alpha" matches 2 discovered skills; using /root-a/alpha, ' +
+        "ignoring /root-b/alpha",
+    ]);
+  });
+
+  it("does not warn when each member name matches exactly one skill", () => {
+    const resolved = resolveLoadout(
+      config({ everyday: ["alpha", "beta"] }),
+      "everyday",
+      discovery(["alpha", "beta"]),
+    );
+
+    expect(resolved.warnings).toEqual([]);
   });
 
   it("rejects an unknown loadout name and lists the configured ones", () => {
