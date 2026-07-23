@@ -48,6 +48,27 @@ describe("parseClaudeTrace", () => {
     expect(parseClaudeTrace(stdout, "planner").invoked).toBe(false);
   });
 
+  it("conformance: records invocation evidence, or null when not triggered", () => {
+    const stdout = [
+      line({
+        message: {
+          content: [{ id: "t1", input: { command: "orient" }, name: "Skill", type: "tool_use" }],
+        },
+        type: "assistant",
+      }),
+      resultEvent,
+    ].join("\n");
+
+    const triggered = parseClaudeTrace(stdout, "orient");
+    expect(triggered.invoked).toBe(true);
+    expect(triggered.invocationEvidence).toContain("Skill tool_use");
+    expect(triggered.invocationEvidence).toContain("orient");
+
+    const notTriggered = parseClaudeTrace(stdout, "planner");
+    expect(notTriggered.invoked).toBe(false);
+    expect(notTriggered.invocationEvidence).toBeNull();
+  });
+
   it("does not treat other tool uses as skill invocations", () => {
     const stdout = [
       line({

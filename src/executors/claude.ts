@@ -106,6 +106,7 @@ export function detectClaude(realConfigDirectory = defaultConfigDirectory()): Ex
 export function parseClaudeTrace(stdout: string, skillName: string): Trace {
   let completed = false;
   let invoked = false;
+  let invocationEvidence: string | null = null;
   let resultText = "";
   const texts: string[] = [];
   let usage: unknown;
@@ -133,6 +134,7 @@ export function parseClaudeTrace(stdout: string, skillName: string): Trace {
           JSON.stringify(block.input ?? "").includes(skillName)
         ) {
           invoked = true;
+          invocationEvidence ??= `Skill tool_use: ${JSON.stringify(block.input ?? null)}`;
         }
       }
     }
@@ -143,5 +145,11 @@ export function parseClaudeTrace(stdout: string, skillName: string): Trace {
     }
   }
 
-  return { agentText: texts.length > 0 ? texts.join("\n") : resultText, completed, invoked, usage };
+  return {
+    agentText: texts.length > 0 ? texts.join("\n") : resultText,
+    completed,
+    invocationEvidence,
+    invoked,
+    usage,
+  };
 }

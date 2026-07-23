@@ -42,6 +42,8 @@ export interface CaseResult {
 export interface Trace {
   readonly agentText: string;
   readonly completed: boolean;
+  /** The trace evidence that proved skill invocation, or null when none was detected. */
+  readonly invocationEvidence: string | null;
   readonly invoked: boolean;
   readonly usage: unknown;
 }
