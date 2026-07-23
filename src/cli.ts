@@ -18,7 +18,9 @@ interface ListOptions {
 interface RunCommandOptions {
   readonly cache: boolean;
   readonly case?: string;
+  readonly effort?: string;
   readonly json?: boolean;
+  readonly model?: string;
   readonly skipBaseline?: boolean;
 }
 
@@ -38,6 +40,8 @@ program
   )
   .argument("[skill...]", "skill names; omit to run every skill with skillval.yml")
   .option("--case <id>", "run only the case with this id")
+  .option("--model <model>", "model for the executor to use this run")
+  .option("--effort <level>", "effort/thinking level for the executor to use this run")
   .option("--no-cache", "ignore cached arm results")
   .option("--skip-baseline", "do not run baseline arms")
   .option("--json", "return the complete report as JSON")
@@ -49,6 +53,8 @@ program
       config,
       {
         caseFilter: options.case,
+        effort: options.effort,
+        model: options.model,
         requestedSkills: skills,
         skipBaseline: options.skipBaseline === true,
         useCache: options.cache,

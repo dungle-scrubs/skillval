@@ -18,6 +18,8 @@ import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
 
 export interface RunOptions {
   readonly caseFilter: string | undefined;
+  readonly effort?: string;
+  readonly model?: string;
   readonly requestedSkills: readonly string[];
   readonly skipBaseline: boolean;
   readonly useCache: boolean;
@@ -68,7 +70,10 @@ export function runEvaluation(
 ): RunOutcome {
   const discovery = discoverSkills(config.roots);
   const selectedSkills = selectSkills(discovery, options.requestedSkills);
-  const executor = createExecutor(config.executor);
+  const executor = createExecutor(config.executor, {
+    effort: options.effort,
+    model: options.model,
+  });
   const stateDirectory = resolveStateDirectory();
   const cache = new ArmCache(stateDirectory);
   const skillInputs = selectedSkills.map((skill) => ({

@@ -5,15 +5,42 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
-import type { Executor, ExecutorMetadata, TrialRequest } from "./types.js";
+import {
+  assertEffortSupported,
+  type Executor,
+  type ExecutorMetadata,
+  type ExecutorOverrides,
+  type TrialRequest,
+} from "./types.js";
 
 const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
+// pi normalizes thinking across every model via pi-ai, from `pi --thinking`.
+export const PI_EFFORT_LEVELS: readonly string[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
+
 export class PiExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
+  readonly #overrides: ExecutorOverrides;
 
-  public constructor(settingsDirectory = join(homedir(), ".pi")) {
-    this.metadata = detectPi(settingsDirectory);
+  public constructor(
+    overrides: ExecutorOverrides = {},
+    settingsDirectory = join(homedir(), ".pi"),
+  ) {
+    assertEffortSupported("pi", overrides.effort, PI_EFFORT_LEVELS);
+    this.#overrides = overrides;
+    const detected = detectPi(settingsDirectory);
+    this.metadata = {
+      ...detected,
+      model: overrides.model ?? detected.model,
+      thinking: overrides.effort ?? detected.thinking,
+    };
   }
 
   public runTrial(request: TrialRequest): Trace {
@@ -21,13 +48,26 @@ export class PiExecutor implements Executor {
     // the user's normal library (mirroring the other adapters), --no-skills hides every skill
     // from the baseline. No HOME or config redirection is needed.
     const arm = request.arm === "skill" ? ["--skill", request.skillDirectory] : ["--no-skills"];
+    // pi expresses effort as a thinking level; the requested model and thinking pass through here.
+    const selection: string[] = [];
+    if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);
+    if (this.#overrides.effort !== undefined) selection.push("--thinking", this.#overrides.effort);
     // Trigger cases are read-only via the tool allowlist; read also loads SKILL.md, so skill
     // invocation stays observable. Generation cases keep pi's default tool set - note pi has no
     // OS sandbox, so setup writes are only conventionally scoped to the workspace.
     const tools = request.evalCase.mode === "generation" ? [] : ["-t", "read"];
     const result = spawnSync(
       "pi",
-      ["-p", "--mode", "json", "--no-session", ...arm, ...tools, request.evalCase.prompt],
+      [
+        "-p",
+        "--mode",
+        "json",
+        "--no-session",
+        ...selection,
+        ...arm,
+        ...tools,
+        request.evalCase.prompt,
+      ],
       {
         cwd: request.workspace,
         encoding: "utf8",

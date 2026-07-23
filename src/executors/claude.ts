@@ -5,21 +5,46 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
-import type { Executor, ExecutorMetadata, TrialRequest } from "./types.js";
+import {
+  assertEffortSupported,
+  type Executor,
+  type ExecutorMetadata,
+  type ExecutorOverrides,
+  type TrialRequest,
+} from "./types.js";
 
 const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
+// Claude Code effort levels, from `claude --effort`.
+export const CLAUDE_EFFORT_LEVELS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+
 export class ClaudeExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
+  readonly #overrides: ExecutorOverrides;
   readonly #realConfigDirectory: string;
 
-  public constructor(realConfigDirectory = defaultConfigDirectory()) {
+  public constructor(
+    overrides: ExecutorOverrides = {},
+    realConfigDirectory = defaultConfigDirectory(),
+  ) {
+    assertEffortSupported("claude", overrides.effort, CLAUDE_EFFORT_LEVELS);
+    this.#overrides = overrides;
     this.#realConfigDirectory = realConfigDirectory;
-    this.metadata = detectClaude(realConfigDirectory);
+    const detected = detectClaude(realConfigDirectory);
+    this.metadata = {
+      ...detected,
+      model: overrides.model ?? detected.model,
+      thinking: overrides.effort ?? detected.thinking,
+    };
   }
 
   public runTrial(request: TrialRequest): Trace {
     if (request.arm === "skill") seedSkill(request);
+    // claude warns and falls back to the default on an unknown --effort, so skillval validates the
+    // level at construction; here the requested model and effort pass straight through.
+    const selection: string[] = [];
+    if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);
+    if (this.#overrides.effort !== undefined) selection.push("--effort", this.#overrides.effort);
     // Trigger cases stay read-only but must allow the Skill tool itself, or invocation is blocked
     // before it can be observed. Generation cases auto-approve edits inside the workspace.
     const permissions =
@@ -45,6 +70,7 @@ export class ClaudeExecutor implements Executor {
         "stream-json",
         "--verbose",
         "--no-session-persistence",
+        ...selection,
         ...permissions,
       ],
       {

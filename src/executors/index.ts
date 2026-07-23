@@ -2,18 +2,18 @@
 import { ClaudeExecutor } from "./claude.js";
 import { CodexExecutor } from "./codex.js";
 import { PiExecutor } from "./pi.js";
-import type { Executor } from "./types.js";
+import type { Executor, ExecutorOverrides } from "./types.js";
 
 const executorFactories = {
-  claude: (): Executor => new ClaudeExecutor(),
-  codex: (): Executor => new CodexExecutor(),
-  pi: (): Executor => new PiExecutor(),
+  claude: (overrides: ExecutorOverrides): Executor => new ClaudeExecutor(overrides),
+  codex: (overrides: ExecutorOverrides): Executor => new CodexExecutor(overrides),
+  pi: (overrides: ExecutorOverrides): Executor => new PiExecutor(overrides),
 };
 
 // Both the configuration schema and factory derive from this registry.
 export type ExecutorName = keyof typeof executorFactories;
 export const EXECUTOR_NAMES = Object.keys(executorFactories) as ExecutorName[];
 
-export function createExecutor(name: ExecutorName): Executor {
-  return executorFactories[name]();
+export function createExecutor(name: ExecutorName, overrides: ExecutorOverrides = {}): Executor {
+  return executorFactories[name](overrides);
 }
