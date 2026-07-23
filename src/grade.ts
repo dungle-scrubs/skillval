@@ -2,11 +2,19 @@
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { runGraders } from "./graders.js";
-import type { Arm, Check, EvalCase, Trace } from "./types.js";
+import type { Check, EvalCase, RuntimeArm, Trace } from "./types.js";
 import { walkFiles } from "./utils.js";
 
+// The arms that seed the target skill, so should_trigger can be graded on them.
+const TARGET_PRESENT_ARMS = new Set<RuntimeArm>(["solo", "group"]);
+
 const INJECTED_FILES = new Set(["package.json", "tsconfig.json"]);
-export function gradeTrial(evalCase: EvalCase, arm: Arm, trace: Trace, workspace: string): Check[] {
+export function gradeTrial(
+  evalCase: EvalCase,
+  arm: RuntimeArm,
+  trace: Trace,
+  workspace: string,
+): Check[] {
   const checks: Check[] = [];
 
   checks.push({
@@ -16,9 +24,8 @@ export function gradeTrial(evalCase: EvalCase, arm: Arm, trace: Trace, workspace
   });
 
   // should_trigger asks whether the target skill activated, so it grades only on arms that seed the
-  // target. In solo mode that is the solo arm; group mode adds the group arm (handled where those
-  // arms are graded). It is never graded on baseline or peers, where the target is absent by design.
-  if (evalCase.should_trigger !== undefined && arm === "solo") {
+  // target (solo, group) - never on baseline or peers, where the target is absent by design.
+  if (evalCase.should_trigger !== undefined && TARGET_PRESENT_ARMS.has(arm)) {
     const evidence = trace.invocationEvidence === null ? "none" : trace.invocationEvidence;
     checks.push({
       detail: `invoked=${trace.invoked}, expected=${evalCase.should_trigger}, evidence=${evidence}`,

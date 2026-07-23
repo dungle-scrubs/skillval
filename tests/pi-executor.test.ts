@@ -76,6 +76,24 @@ describe("parsePiTrace", () => {
     expect(notTriggered.invocationEvidence).toBeNull();
   });
 
+  it("does not attribute a peer skill's SKILL.md read to the target", () => {
+    const stdout = agentEnd([
+      {
+        content: [
+          {
+            arguments: { path: "/home/user/skills/commit-orient/SKILL.md" },
+            id: "call_1",
+            name: "read",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    expect(parsePiTrace(stdout, "orient").invoked).toBe(false);
+  });
+
   it("ignores tool results and user messages when collecting text", () => {
     const stdout = agentEnd([
       { content: [{ text: "file contents here", type: "text" }], role: "user" },

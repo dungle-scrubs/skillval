@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
-import { isRecord } from "../utils.js";
+import { isRecord, readsSkillMarkdown } from "../utils.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -164,7 +164,9 @@ export function parseCodexTrace(stdout: string, skillName: string): Trace {
     if (
       item?.type === "command_execution" &&
       typeof item.command === "string" &&
-      item.command.includes(`${skillName}/SKILL.md`)
+      // Whole path segment so a peer skill named "commit-<name>" is not attributed to target
+      // "<name>" in a group arm, while relative reads still match.
+      readsSkillMarkdown(item.command, skillName)
     ) {
       invoked = true;
       invocationEvidence ??= `command_execution: ${item.command}`;

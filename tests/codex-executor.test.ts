@@ -52,6 +52,20 @@ describe("parseCodexTrace", () => {
     expect(notTriggered.invocationEvidence).toBeNull();
   });
 
+  it("does not attribute a peer skill's SKILL.md read to the target", () => {
+    // A group arm seeds peers alongside the target; reading "commit-orient" must not count as
+    // invoking target "orient".
+    const stdout = [
+      commandExecution("cat .agents/skills/commit-orient/SKILL.md"),
+      turnCompleted,
+    ].join("\n");
+
+    const trace = parseCodexTrace(stdout, "orient");
+
+    expect(trace.invoked).toBe(false);
+    expect(trace.invocationEvidence).toBeNull();
+  });
+
   it("does not treat unrelated commands as skill invocations", () => {
     const stdout = [commandExecution("ls -la"), turnCompleted].join("\n");
 

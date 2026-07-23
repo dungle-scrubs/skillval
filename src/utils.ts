@@ -6,6 +6,14 @@ export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+// Whether trace text reads the target skill's SKILL.md as a whole path segment. The skill name must
+// sit at the start of a path or after a non-name character, so a peer named "commit-<name>" is not
+// mistaken for target "<name>", while relative reads like "cat <name>/SKILL.md" still match.
+export function readsSkillMarkdown(text: string, skillName: string): boolean {
+  const escaped = skillName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^\\w-])${escaped}/SKILL\\.md`).test(text);
+}
+
 // Order-independent hash of the set of skills seeded in an arm. A set defines an arm, not an
 // ordering, so members are framed then sorted. Each member frames both its name and its content
 // hash, because skills install under their names: two identically-hashed skills with different

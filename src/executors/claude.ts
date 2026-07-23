@@ -203,10 +203,13 @@ export function parseClaudeTrace(stdout: string, skillName: string): Trace {
         if (
           block.type === "tool_use" &&
           block.name === "Skill" &&
-          JSON.stringify(block.input ?? "").includes(skillName)
+          isRecord(block.input) &&
+          // Exact match on the Skill tool's skill field: a peer invocation whose name merely
+          // contains the target name must not be attributed to the target in a group arm.
+          block.input.skill === skillName
         ) {
           invoked = true;
-          invocationEvidence ??= `Skill tool_use: ${JSON.stringify(block.input ?? null)}`;
+          invocationEvidence ??= `Skill tool_use: ${JSON.stringify(block.input)}`;
         }
       }
     }

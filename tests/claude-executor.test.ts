@@ -41,7 +41,7 @@ describe("parseClaudeTrace", () => {
     const stdout = [
       line({
         message: {
-          content: [{ id: "t1", input: { command: "orient" }, name: "Skill", type: "tool_use" }],
+          content: [{ id: "t1", input: { skill: "orient" }, name: "Skill", type: "tool_use" }],
         },
         type: "assistant",
       }),
@@ -56,7 +56,7 @@ describe("parseClaudeTrace", () => {
     const stdout = [
       line({
         message: {
-          content: [{ id: "t1", input: { command: "orient" }, name: "Skill", type: "tool_use" }],
+          content: [{ id: "t1", input: { skill: "orient" }, name: "Skill", type: "tool_use" }],
         },
         type: "assistant",
       }),
@@ -71,6 +71,22 @@ describe("parseClaudeTrace", () => {
     const notTriggered = parseClaudeTrace(stdout, "planner");
     expect(notTriggered.invoked).toBe(false);
     expect(notTriggered.invocationEvidence).toBeNull();
+  });
+
+  it("does not attribute a peer skill invocation to the target", () => {
+    const stdout = [
+      line({
+        message: {
+          content: [
+            { id: "t1", input: { skill: "commit-orient" }, name: "Skill", type: "tool_use" },
+          ],
+        },
+        type: "assistant",
+      }),
+      resultEvent,
+    ].join("\n");
+
+    expect(parseClaudeTrace(stdout, "orient").invoked).toBe(false);
   });
 
   it("does not treat other tool uses as skill invocations", () => {

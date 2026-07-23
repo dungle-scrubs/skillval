@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
-import { isRecord } from "../utils.js";
+import { isRecord, readsSkillMarkdown } from "../utils.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -161,7 +161,9 @@ export function parsePiTrace(stdout: string, skillName: string): Trace {
         if (block.type === "text" && typeof block.text === "string") texts.push(block.text);
         if (
           block.type === "toolCall" &&
-          JSON.stringify(block.arguments ?? "").includes(`${skillName}/SKILL.md`)
+          // Whole path segment so a peer skill named "commit-<name>" is not attributed to target
+          // "<name>" in a group arm, while relative reads still match.
+          readsSkillMarkdown(JSON.stringify(block.arguments ?? ""), skillName)
         ) {
           invoked = true;
           const name = typeof block.name === "string" ? block.name : "toolCall";
