@@ -113,7 +113,7 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 - `cache/` stores arm results.
 - `reports/` stores run reports named by a hash of the participating skills and their content
   hashes. Each report also includes every participating skill's content hash and the executor's
-  name, version, model, and thinking-level identity.
+  name, version, model, thinking-level identity, and invocation-detection method.
 
 `skillval list` returns the skill name, configured root, class, case count, whether `skillval.yml`
 exists, and a `missing`, `invalid`, or `ready` status in JSON output. Invalid case files include a
@@ -307,6 +307,11 @@ enforced isolation, so an agent's writes are only conventionally scoped to the w
 of this, skillval refuses to run pi generation cases unless you pass `--allow-unsandboxed-pi` to
 acknowledge the missing sandbox. Trigger cases are read-only and unaffected. Prefer codex or claude
 for untrusted generation cases.
+
+Each adapter reports its detection method as `invocationDetection` in report metadata. The
+`invoked` signal has asymmetric confidence: claude detects invocation from a structured `Skill`
+tool_use block, while codex and pi string-match trace text for `<skill>/SKILL.md`. Trigger rates
+should not be compared across executors as if they measured the same thing.
 
 By default, executors do not set a model or thinking/effort level; trials inherit the harness
 defaults the user has configured, and each adapter captures both into its identity so results are

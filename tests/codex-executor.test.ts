@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexTrace } from "../src/executors/codex.js";
+import { CODEX_INVOCATION_DETECTION, parseCodexTrace } from "../src/executors/codex.js";
 
 const line = (value: unknown): string => JSON.stringify(value);
 
@@ -15,6 +15,10 @@ const commandExecution = (command: string): string =>
   line({ item: { command, type: "command_execution" }, type: "item.completed" });
 
 describe("parseCodexTrace", () => {
+  it("reports heuristic invocation detection metadata", () => {
+    expect(CODEX_INVOCATION_DETECTION).toBe("heuristic");
+  });
+
   it("collects agent text, completion, and usage", () => {
     const stdout = [
       line({ type: "thread.started" }),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseClaudeTrace } from "../src/executors/claude.js";
+import { CLAUDE_INVOCATION_DETECTION, parseClaudeTrace } from "../src/executors/claude.js";
 
 const line = (value: unknown): string => JSON.stringify(value);
 
@@ -11,6 +11,10 @@ const resultEvent = line({
 });
 
 describe("parseClaudeTrace", () => {
+  it("reports structured invocation detection metadata", () => {
+    expect(CLAUDE_INVOCATION_DETECTION).toBe("structured");
+  });
+
   it("collects assistant text, completion, and usage", () => {
     const stdout = [
       line({ subtype: "init", type: "system" }),
