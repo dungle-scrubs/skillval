@@ -44,7 +44,10 @@ export class ArmCache {
     writeFileSync(path, JSON.stringify(result));
   }
 
-  #path(identity: ArmCacheIdentity): string {
+  // The canonical content-addressed key for an arm identity. Two identities collide here exactly when
+  // a real run would reuse one arm's stored result for the other, so a dry run can dedup identities it
+  // has already scheduled without duplicating this derivation.
+  public keyFor(identity: ArmCacheIdentity): string {
     // Every input that can change an arm result belongs in this identity. loadoutHash captures the
     // exact set of skills seeded in this arm, so an arm's key changes precisely when its membership
     // or a member's content changes - and the empty baseline (no skills seeded) stays independent
@@ -63,7 +66,10 @@ export class ArmCache {
     // a skill name can never be mistaken for a fixture hash.
     if (identity.fixtureHash !== undefined) parts.push(`fixture\0${identity.fixtureHash}`);
     if (identity.triggerTarget !== undefined) parts.push(`target\0${identity.triggerTarget}`);
-    const key = sha256(parts.join("\0"));
-    return join(this.#stateDirectory, "cache", `${key}.json`);
+    return sha256(parts.join("\0"));
+  }
+
+  #path(identity: ArmCacheIdentity): string {
+    return join(this.#stateDirectory, "cache", `${this.keyFor(identity)}.json`);
   }
 }

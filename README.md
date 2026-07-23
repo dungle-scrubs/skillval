@@ -79,6 +79,30 @@ need an assertion that grades behavior on the `peers` arm (a `must_match`, grade
 pure trigger-only case - `should_trigger` and nothing else - has no such check on `peers` (the
 trigger check is target-specific), so it is reported `inconclusive` unless it shows interference.
 
+## Cost preview
+
+Group mode multiplies trials: three arms per case, each up to five trials on disagreement, across
+every case. Before spending, run `--dry-run` to see exactly what a run would cost against the current
+cache - it resolves the same skills, loadout, executor identity, and cache a real run would, then
+reports the trials that would run without spawning a single one:
+
+```console
+$ skillval run --loadout everyday --dry-run
+executor: codex codex-cli 0.145.0 (model gpt-5.6-sol, thinking medium, invocation detection heuristic)
+dry run: no trials will be spawned
+commit-style:
+  wraps-body [solo] run (3-5 trials)
+  wraps-body [group] cached
+  wraps-body [peers] run (3-5 trials)
+plan: 2 arm(s) to run, 1 cached, 0 reused
+trials to run: 6 (up to 10 if arms escalate on disagreement)
+```
+
+Each arm is `cached` (a hit, no trials), `reused from solo` (a group arm with no peers to add), or
+`run` with its trial count - the minimum it will spend, and the ceiling if trials disagree and
+escalate to five. `--dry-run` writes no report and applies no execution gates, so it previews cost
+even for a suite a real run would refuse. `--json` returns the full plan.
+
 ## Install
 
 ```sh
@@ -134,8 +158,9 @@ all cases passed
 
 Run every discovered skill that has a `skillval.yml` by omitting the skill names. Use `--case <id>`
 to select one case, `--no-cache` to ignore cached arm results, `--skip-baseline` to omit baseline
-arms, and `--json` for the complete report. The command exits with status 1 when any selected
-case's solo arm fails.
+arms, `--dry-run` to preview the trials a run would cost without spawning any (see
+[Cost preview](#cost-preview)), and `--json` for the complete report. The command exits with status 1
+when any selected case's solo arm fails.
 
 Use `--model <model>` and `--effort <level>` to pin the executor's model and effort for the run,
 so you can evaluate one skill under, for example, `--model sonnet --effort medium`. Both pass
