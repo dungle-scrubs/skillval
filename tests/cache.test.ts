@@ -21,7 +21,13 @@ const evalCase: EvalCase = {
 const identity: ArmCacheIdentity = {
   arm: "skill",
   evalCase,
-  executor: { model: "model-a", name: "codex", thinking: "medium", version: "codex 1.0" },
+  executor: {
+    invocationDetection: "heuristic",
+    model: "model-a",
+    name: "codex",
+    thinking: "medium",
+    version: "codex 1.0",
+  },
   skillHash: "skill-hash",
 };
 const result: ArmResult = {

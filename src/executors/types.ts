@@ -2,6 +2,10 @@
 import type { Arm, EvalCase, Trace } from "../types.js";
 
 export interface ExecutorMetadata {
+  // Records how the adapter decides the invoked trigger signal: "structured" means a dedicated
+  // tool-use event names the skill; "heuristic" means command or argument text is string-matched
+  // for <skill>/SKILL.md, so trigger rates are not directly comparable across executors.
+  readonly invocationDetection: "structured" | "heuristic";
   readonly model: string;
   readonly name: string;
   // The thinking/effort level in effect for this run, or "default" when neither an override nor the

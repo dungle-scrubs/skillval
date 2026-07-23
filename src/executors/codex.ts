@@ -27,6 +27,7 @@ export const CODEX_EFFORT_LEVELS: readonly string[] = [
   "xhigh",
   "max",
 ];
+export const CODEX_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "heuristic";
 
 export class CodexExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
@@ -110,7 +111,13 @@ export function detectCodex(realHome = homedir()): ExecutorMetadata {
   const model = configuration.match(/^model\s*=\s*"([^"]+)"/m)?.[1] ?? "default";
   const thinking =
     configuration.match(/^model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1] ?? "default";
-  return { model, name: "codex", thinking, version };
+  return {
+    invocationDetection: CODEX_INVOCATION_DETECTION,
+    model,
+    name: "codex",
+    thinking,
+    version,
+  };
 }
 
 export function parseCodexTrace(stdout: string, skillName: string): Trace {

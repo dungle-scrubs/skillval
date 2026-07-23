@@ -81,6 +81,11 @@ export function runEvaluation(
     effort: options.effort,
     model: options.model,
   });
+  log(
+    `executor: ${executor.metadata.name} ${executor.metadata.version} ` +
+      `(model ${executor.metadata.model}, thinking ${executor.metadata.thinking}, ` +
+      `invocation detection ${executor.metadata.invocationDetection})`,
+  );
   const stateDirectory = resolveStateDirectory();
   const cache = new ArmCache(stateDirectory);
   const skillInputs = selectedSkills.map((skill) => ({

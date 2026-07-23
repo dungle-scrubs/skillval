@@ -24,6 +24,7 @@ export const PI_EFFORT_LEVELS: readonly string[] = [
   "high",
   "xhigh",
 ];
+export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "heuristic";
 
 export class PiExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
@@ -114,7 +115,13 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
   } catch {
     // No readable settings file; pi's own default model applies.
   }
-  return { model, name: "pi", thinking, version };
+  return {
+    invocationDetection: PI_INVOCATION_DETECTION,
+    model,
+    name: "pi",
+    thinking,
+    version,
+  };
 }
 
 export function parsePiTrace(stdout: string, skillName: string): Trace {

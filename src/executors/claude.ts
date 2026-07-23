@@ -17,6 +17,7 @@ const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
 // Claude Code effort levels, from `claude --effort`.
 export const CLAUDE_EFFORT_LEVELS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+export const CLAUDE_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "structured";
 
 export class ClaudeExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
@@ -126,7 +127,13 @@ export function detectClaude(realConfigDirectory = defaultConfigDirectory()): Ex
   } catch {
     // No readable settings file; the account default model applies.
   }
-  return { model, name: "claude", thinking, version };
+  return {
+    invocationDetection: CLAUDE_INVOCATION_DETECTION,
+    model,
+    name: "claude",
+    thinking,
+    version,
+  };
 }
 
 export function parseClaudeTrace(stdout: string, skillName: string): Trace {

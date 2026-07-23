@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePiTrace } from "../src/executors/pi.js";
+import { PI_INVOCATION_DETECTION, parsePiTrace } from "../src/executors/pi.js";
 
 const line = (value: unknown): string => JSON.stringify(value);
 
@@ -9,6 +9,10 @@ const agentEnd = (messages: unknown[]): string =>
 const usage = { input: 100, output: 20, totalTokens: 120 };
 
 describe("parsePiTrace", () => {
+  it("reports heuristic invocation detection metadata", () => {
+    expect(PI_INVOCATION_DETECTION).toBe("heuristic");
+  });
+
   it("collects assistant text and usage from the agent_end transcript", () => {
     const stdout = [
       line({ type: "session", version: 3 }),
