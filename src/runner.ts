@@ -124,7 +124,7 @@ export function runEvaluation(
     options.caseFilter,
     options.allowUnsandboxedPi,
   );
-  const loadout = resolveRunLoadout(config, options.loadout, discovery);
+  const loadout = resolveRunLoadout(config, options.loadout, discovery, log);
   const executor = createExecutor(config.executor, {
     effort: options.effort,
     model: options.model,
@@ -203,9 +203,11 @@ function resolveRunLoadout(
   config: SkillvalConfig,
   name: string | undefined,
   discovery: ReturnType<typeof discoverSkills>,
+  log: (message: string) => void,
 ): RunLoadout | undefined {
   if (name === undefined) return undefined;
   const resolved = resolveLoadout(config, name, discovery);
+  for (const warning of resolved.warnings) log(`warning: ${warning}`);
   return {
     members: resolved.members.map((member) => ({
       ...member,

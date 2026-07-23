@@ -51,7 +51,9 @@ skillval run typescript-style --loadout everyday
 Group mode runs three arms per case (ignoring the case's `arms` field, since the verdict needs all
 three): `solo` (the target alone), `group` (the loadout plus the target), and `peers` (the loadout
 minus the target). Every arm runs clean, differing only by its seeded set. Loadout members must be
-discovered skills; they only need a `SKILL.md`, not a `skillval.yml`. The verdict per case:
+discovered skills; they only need a `SKILL.md`, not a `skillval.yml`. If a member name matches more
+than one discovered skill (the same name under two roots), the first match wins and the run prints a
+`warning:` line naming what was used and what was shadowed. The verdict per case:
 
 | Arms | Verdict |
 | --- | --- |
