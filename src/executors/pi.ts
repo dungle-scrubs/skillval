@@ -1,6 +1,6 @@
 /** Implements pi-specific skill loading, arm isolation, invocation, and trace parsing. */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
@@ -10,6 +10,7 @@ import {
   type Executor,
   type ExecutorMetadata,
   type ExecutorOverrides,
+  type SeededInstruction,
   type SeededSkill,
   type TrialRequest,
 } from "./types.js";
@@ -37,6 +38,44 @@ export function piSkillArgs(seededSkills: readonly SeededSkill[]): string[] {
   return args;
 }
 
+// Files that carry authentication and model selection, safe to mirror into a clean agent directory.
+// Everything else is omitted on purpose - in particular the global AGENTS.md/CLAUDE.md that pi would
+// otherwise load into every arm, and the extensions and prompts directories, which are behavioral.
+const PI_CLEAN_FILES: readonly string[] = [
+  "auth.json",
+  "auth-profiles.json",
+  "models.json",
+  "settings.json",
+];
+
+// A clean PI_CODING_AGENT_DIR holding only auth and model configuration, by symlink so token
+// refreshes still reach the real files. Any global instruction file in the real directory is left
+// behind, which is the point.
+export function prepareCleanPiHome(
+  home: string,
+  realAgentDirectory = defaultPiAgentDirectory(),
+): string {
+  const cleanDirectory = join(home, "pi-agent");
+  mkdirSync(cleanDirectory, { recursive: true });
+  for (const file of PI_CLEAN_FILES) {
+    const source = join(realAgentDirectory, file);
+    const destination = join(cleanDirectory, file);
+    if (existsSync(source) && !existsSync(destination)) symlinkSync(source, destination);
+  }
+  return cleanDirectory;
+}
+
+function defaultPiAgentDirectory(): string {
+  return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi");
+}
+
+// Writes the instruction arm's ambient file. The runner supplies the filename from per-executor
+// resolution (pi reads both names, AGENTS.md first), so no filename translation happens here.
+export function seedInstruction(workspace: string, instruction?: SeededInstruction): void {
+  if (instruction === undefined) return;
+  writeFileSync(join(workspace, instruction.filename), instruction.content);
+}
+
 export class PiExecutor implements Executor {
   public readonly metadata: ExecutorMetadata;
   readonly #overrides: ExecutorOverrides;
@@ -56,8 +95,9 @@ export class PiExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
+    seedInstruction(request.workspace, request.seededInstruction);
     // Clean skill loading (see piSkillArgs): --no-skills hides the user's library, --skill seeds
-    // this arm's set. No HOME or config redirection is needed.
+    // this arm's set. Instruction-file isolation is handled separately, below.
     const arm = piSkillArgs(request.seededSkills);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
     const selection: string[] = [];
@@ -67,6 +107,16 @@ export class PiExecutor implements Executor {
     // invocation stays observable. Generation cases keep pi's default tool set - note pi has no
     // OS sandbox, so setup writes are only conventionally scoped to the workspace.
     const tools = request.evalCase.mode === "generation" ? [] : ["-t", "read"];
+    // Every arm runs clean: pi discovers AGENTS.md/CLAUDE.md from its agent directory as well as the
+    // workspace, and a user-global instruction file there would enter every arm identically - a
+    // global rule duplicating the target rule would make the peers arm pass and misreport the target
+    // as redundant. Redirect the agent directory (and HOME) at a clean per-trial copy carrying only
+    // auth and model selection, so the workspace instruction file is the only ambient one.
+    const environment = {
+      ...process.env,
+      HOME: request.home,
+      PI_CODING_AGENT_DIR: prepareCleanPiHome(request.home),
+    };
     const result = spawnSync(
       "pi",
       [
@@ -82,7 +132,7 @@ export class PiExecutor implements Executor {
       {
         cwd: request.workspace,
         encoding: "utf8",
-        env: { ...process.env },
+        env: environment,
         maxBuffer: 64 * 1024 * 1024,
         timeout: TRIAL_TIMEOUT_MS,
       },

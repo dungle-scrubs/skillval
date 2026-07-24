@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
 /** Defines the command-line transport and renders runner and discovery results. */
+import { spawn } from "node:child_process";
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath } from "./config.js";
-import type { DiscoveredSkill } from "./discovery.js";
-import { discoverSkills, discoveryReport } from "./discovery.js";
+import type { DiscoveredInstruction, DiscoveredSkill } from "./discovery.js";
+import {
+  discoverProjects,
+  discoverSkills,
+  discoveryReport,
+  projectDiscoveryReport,
+} from "./discovery.js";
 import type { ArmPlan, RunPlan } from "./runner.js";
-import { planEvaluation, runEvaluation } from "./runner.js";
+import { planEvaluation, routeRunTargets, runEvaluation } from "./runner.js";
 
 interface GlobalOptions {
   readonly config?: string;
@@ -41,9 +47,9 @@ program
 program
   .command("run")
   .description(
-    "Run selected cases and return a report whose exit status fails when any skill arm fails",
+    "Run selected cases and return a report whose exit status fails when any target arm fails",
   )
-  .argument("[skill...]", "skill names; omit to run every skill with skillval.yml")
+  .argument("[target...]", "skill names or instruction target IDs; omit to run every ready target")
   .option("--case <id>", "run only the case with this id")
   .option("--model <model>", "model for the executor to use this run")
   .option("--effort <level>", "effort/thinking level for the executor to use this run")
@@ -63,10 +69,11 @@ program
     "acknowledge that pi generation trials run without an OS sandbox",
   )
   .option("--json", "return the complete report as JSON")
-  .action((skills: string[], options: RunCommandOptions, command: Command): void => {
+  .action((targets: string[], options: RunCommandOptions, command: Command): void => {
     const globalOptions = command.optsWithGlobals() as GlobalOptions & RunCommandOptions;
     const configPath = resolveConfigPath({ cliPath: globalOptions.config });
     const config = loadConfig(configPath);
+    const requested = routeRunTargets(targets);
     const runOptions = {
       allowShell: options.allowShell === true,
       allowUnsandboxedPi: options.allowUnsandboxedPi === true,
@@ -74,7 +81,8 @@ program
       effort: options.effort,
       loadout: options.loadout,
       model: options.model,
-      requestedSkills: skills,
+      requestedInstructions: requested.requestedInstructions,
+      requestedSkills: requested.requestedSkills,
       skipBaseline: options.skipBaseline === true,
       useCache: options.cache,
     };
@@ -98,9 +106,13 @@ program
       console.log(JSON.stringify(outcome.report, null, 2));
     } else {
       console.log(`report: ${outcome.reportPath}`);
+      if (outcome.htmlReportPath !== undefined) {
+        console.log(`html: ${outcome.htmlReportPath}`);
+        openInBrowser(outcome.htmlReportPath);
+      }
       if (outcome.noops > 0) {
         console.log(
-          `no-op alert: ${outcome.noops} case(s) pass without the skill - prune candidates`,
+          `no-op alert: ${outcome.noops} case(s) pass without the target - prune candidates`,
         );
       }
       if (outcome.interferences > 0) {
@@ -126,17 +138,60 @@ program
     const configPath = resolveConfigPath({ cliPath: globalOptions.config });
     const config = loadConfig(configPath);
     const discovery = discoverSkills(config.roots);
+    const projectDiscovery = discoverProjects(config.projects ?? []);
     if (options.json === true) {
-      console.log(JSON.stringify(discoveryReport(discovery), null, 2));
+      const rootReport = discoveryReport(discovery);
+      if (config.projects === undefined) {
+        console.log(JSON.stringify(rootReport, null, 2));
+      } else {
+        const projectReport = projectDiscoveryReport(projectDiscovery);
+        console.log(
+          JSON.stringify(
+            {
+              instructions: projectReport.instructions,
+              missingRoots: [...rootReport.missingRoots, ...projectReport.missingRoots],
+              skills: [...rootReport.skills, ...projectReport.skills],
+            },
+            null,
+            2,
+          ),
+        );
+      }
       return;
     }
 
-    printSkillTable(discovery.skills);
-    for (const skill of discovery.skills) {
+    const skills = [...discovery.skills, ...projectDiscovery.skills];
+    printSkillTable(skills);
+    for (const skill of skills) {
       if (skill.status === "invalid") console.log(`invalid skill: ${skill.validationError}`);
     }
-    for (const root of discovery.missingRoots) console.log(`missing root: ${root}`);
+    if (config.projects !== undefined) {
+      console.log("");
+      printInstructionTable(projectDiscovery.instructions);
+      for (const instruction of projectDiscovery.instructions) {
+        if (instruction.status === "invalid") {
+          console.log(`invalid instruction target: ${instruction.validationError}`);
+        }
+      }
+    }
+    for (const root of [...discovery.missingRoots, ...projectDiscovery.missingRoots]) {
+      console.log(`missing root: ${root}`);
+    }
   });
+
+// Opening the report is a convenience, never a failure mode: a headless or unusual environment
+// simply keeps the printed path. The child is detached and unref'd so the CLI can exit immediately.
+function openInBrowser(path: string): void {
+  const command =
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  try {
+    const child = spawn(command, [path], { detached: true, stdio: "ignore" });
+    child.on("error", () => undefined);
+    child.unref();
+  } catch {
+    // No opener available; the path above is the fallback.
+  }
+}
 
 export async function main(): Promise<void> {
   try {
@@ -157,6 +212,18 @@ function printPlan(plan: RunPlan): void {
   for (const skill of plan.skills) {
     console.log(`${skill.name}:`);
     for (const casePlan of skill.cases) {
+      for (const arm of casePlan.arms) {
+        console.log(`  ${casePlan.id} [${arm.arm}] ${armPlanStatus(arm)}`);
+      }
+    }
+  }
+  for (const target of plan.instructions) {
+    console.log(`${target.id}:`);
+    for (const casePlan of target.cases) {
+      if (casePlan.na) {
+        console.log(`  ${casePlan.id} n/a (not visible to this executor; spends nothing)`);
+        continue;
+      }
       for (const arm of casePlan.arms) {
         console.log(`  ${casePlan.id} [${arm.arm}] ${armPlanStatus(arm)}`);
       }
@@ -190,6 +257,31 @@ function printSkillTable(skills: readonly DiscoveredSkill[]): void {
       skill.class ?? "-",
       String(skill.caseCount),
       skill.hasSkillval ? "true" : "false",
+    ]),
+  ];
+  const widths = rows[0]?.map((_, column) =>
+    Math.max(...rows.map((row) => row[column]?.length ?? 0)),
+  );
+  for (const row of rows) {
+    console.log(
+      row
+        .map((cell, column) => cell.padEnd(widths?.[column] ?? cell.length))
+        .join("  ")
+        .trimEnd(),
+    );
+  }
+}
+
+function printInstructionTable(instructions: readonly DiscoveredInstruction[]): void {
+  const rows = [
+    ["ID", "DIRECTORY", "FILES", "CLASS", "CASES", "STATUS"],
+    ...instructions.map((instruction) => [
+      instruction.id,
+      instruction.directory,
+      instruction.files.join(","),
+      instruction.class ?? "-",
+      String(instruction.caseCount),
+      instruction.status,
     ]),
   ];
   const widths = rows[0]?.map((_, column) =>

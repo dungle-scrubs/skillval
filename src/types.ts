@@ -2,7 +2,14 @@
 import type { Arm } from "./case-contract.js";
 import type { Verdict } from "./verdict.js";
 
-export type { Arm, CaseAssert, EvalCase, Fixture, SkillEvals } from "./case-contract.js";
+export type {
+  Arm,
+  CaseAssert,
+  EvalCase,
+  EvalTarget,
+  Fixture,
+  SkillEvals,
+} from "./case-contract.js";
 
 // Arms a run can produce. Case files declare only the solo/baseline pair (Arm); group mode adds the
 // group and peers arms, which are generated from --loadout and never authored in a case file.

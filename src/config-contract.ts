@@ -9,6 +9,14 @@ export const configFileSchema = Type.ReadonlyObject(
     executor: Type.Enum(EXECUTOR_NAMES, {
       description: "Trial executor.",
     }),
+    // Write a self-contained HTML report beside the JSON one after each run, and open it. Enabled
+    // when omitted; set false to keep runs headless (CI, scripted use).
+    htmlReport: Type.Optional(
+      Type.Boolean({
+        description:
+          "Write and open a self-contained HTML report after each run. Enabled when omitted.",
+      }),
+    ),
     // Named skill sets for loadout mode: each maps a loadout name to the skill names it contains.
     loadouts: Type.Optional(
       Type.Record(
@@ -19,6 +27,14 @@ export const configFileSchema = Type.ReadonlyObject(
         {
           description: "Named skill sets: loadout name to the skill names it contains.",
         },
+      ),
+    ),
+    projects: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.String({ minLength: 1, pattern: String.raw`\S` }), {
+          description:
+            "Project trees scanned recursively for CLAUDE.md/AGENTS.md and project-scoped skills that carry a sibling skillval.yml.",
+        }),
       ),
     ),
     roots: Type.Readonly(

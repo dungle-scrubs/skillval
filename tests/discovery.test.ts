@@ -1,8 +1,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { discoverSkills, discoveryReport, selectSkills } from "../src/discovery.js";
+import {
+  discoverProjects,
+  discoverSkills,
+  discoveryReport,
+  selectSkills,
+} from "../src/discovery.js";
 
 const directories: string[] = [];
 
@@ -47,6 +52,57 @@ describe("skill discovery", () => {
   });
 });
 
+describe("project discovery", () => {
+  it("finds nested instruction targets and project-scoped skills while skipping vendor trees", () => {
+    const root = createRoot();
+    const projectBase = basename(root);
+    createInstructionTarget(root, "AGENTS.md");
+    createInstructionTarget(join(root, "packages/api"), "CLAUDE.md");
+    createSkill(join(root, ".claude/skills"), "foo", normalSkillCaseFile("foo"));
+    createInstructionTarget(join(root, "node_modules/dependency"), "AGENTS.md");
+    createInstructionTarget(join(root, ".git/hooks"), "CLAUDE.md");
+
+    const discovery = discoverProjects([root]);
+
+    expect(discovery.instructions.map((instruction) => instruction.id)).toEqual([
+      `${projectBase}:.`,
+      `${projectBase}:packages/api`,
+    ]);
+    expect(discovery.instructions.map((instruction) => instruction.status)).toEqual([
+      "ready",
+      "ready",
+    ]);
+    expect(discovery.skills).toHaveLength(1);
+    expect(discovery.skills[0]).toMatchObject({ name: "foo", status: "ready" });
+  });
+
+  it("reports instruction case files with a forbidden skill or a skill target as invalid", () => {
+    const root = createRoot();
+    createInstructionTarget(
+      join(root, "with-skill"),
+      "AGENTS.md",
+      "target: instructions\nskill: forbidden\nclass: capability\ncases: []\n",
+    );
+    createInstructionTarget(
+      join(root, "skill-target"),
+      "CLAUDE.md",
+      normalSkillCaseFile("plain-skill"),
+    );
+
+    const discovery = discoverProjects([root]);
+
+    expect(discovery.instructions).toHaveLength(2);
+    expect(discovery.instructions[0]).toMatchObject({
+      status: "invalid",
+      validationError: expect.stringContaining('target must be "instructions"'),
+    });
+    expect(discovery.instructions[1]).toMatchObject({
+      status: "invalid",
+      validationError: expect.stringContaining('must not declare "skill"'),
+    });
+  });
+});
+
 function createRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "skillval-discovery-test-"));
   directories.push(root);
@@ -55,7 +111,21 @@ function createRoot(): string {
 
 function createSkill(root: string, name: string, caseFile?: string): void {
   const directory = join(root, name);
-  mkdirSync(directory);
+  mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "SKILL.md"), `# ${name}\n`);
   if (caseFile !== undefined) writeFileSync(join(directory, "skillval.yml"), caseFile);
+}
+
+function createInstructionTarget(
+  directory: string,
+  instructionFile: "AGENTS.md" | "CLAUDE.md",
+  caseFile = "target: instructions\nclass: preference\ncases: []\n",
+): void {
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, instructionFile), "# Instructions\n");
+  writeFileSync(join(directory, "skillval.yml"), caseFile);
+}
+
+function normalSkillCaseFile(name: string): string {
+  return `skill: ${name}\nclass: capability\ncases: []\n`;
 }

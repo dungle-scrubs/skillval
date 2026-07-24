@@ -1,6 +1,6 @@
 /** Implements Codex-specific skill seeding, process isolation, invocation, and trace parsing. */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
@@ -10,6 +10,7 @@ import {
   type Executor,
   type ExecutorMetadata,
   type ExecutorOverrides,
+  type SeededInstruction,
   type SeededSkill,
   type TrialRequest,
 } from "./types.js";
@@ -49,6 +50,7 @@ export class CodexExecutor implements Executor {
 
   public runTrial(request: TrialRequest): Trace {
     seedSkills(request.workspace, request.seededSkills);
+    seedInstruction(request.workspace, request.seededInstruction);
     const sandbox = request.evalCase.mode === "generation" ? "workspace-write" : "read-only";
     // Config overrides take precedence over config.toml, so the chosen model/effort apply to both
     // arms. The value portion is parsed as TOML, so a JSON-quoted string is a valid TOML string.
@@ -126,6 +128,13 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): v
   for (const skill of skills) {
     symlinkSync(skill.directory, join(skillsRoot, skill.name));
   }
+}
+
+// Writes the instruction arm's ambient file. The runner supplies the filename from per-executor
+// resolution (codex reads AGENTS.md natively), so no filename translation happens here.
+export function seedInstruction(workspace: string, instruction?: SeededInstruction): void {
+  if (instruction === undefined) return;
+  writeFileSync(join(workspace, instruction.filename), instruction.content);
 }
 
 export function detectCodex(realHome = homedir()): ExecutorMetadata {

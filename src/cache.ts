@@ -7,13 +7,19 @@ import type { ArmResult, EvalCase, RuntimeArm } from "./types.js";
 import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
-export const RUNNER_VERSION = 12;
+// 13: instruction-file arms and the instructionHash cache-identity field.
+export const RUNNER_VERSION = 13;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
   readonly evalCase: EvalCase;
   readonly executor: ExecutorMetadata;
   readonly fixtureHash?: string;
+  // Content hash of the resolved instruction file this arm makes ambient, set only for instruction
+  // targets. Two instruction cases can share identical case JSON (id, prompt, rule_text) while their
+  // surrounding rules differ, so the seeded content - not just the case - must key the arm. Omitted
+  // for skill targets, whose seeded set is captured by loadoutHash instead.
+  readonly instructionHash?: string;
   // Order-independent hash of the set of skills seeded in this arm (see loadoutHash). The empty
   // baseline hashes an empty set, so it stays independent of any skill's content.
   readonly loadoutHash: string;
@@ -65,6 +71,9 @@ export class ArmCache {
     // Appended conditionally and framed so fixture-free, single-arm identities keep stable keys and
     // a skill name can never be mistaken for a fixture hash.
     if (identity.fixtureHash !== undefined) parts.push(`fixture\0${identity.fixtureHash}`);
+    if (identity.instructionHash !== undefined) {
+      parts.push(`instruction\0${identity.instructionHash}`);
+    }
     if (identity.triggerTarget !== undefined) parts.push(`target\0${identity.triggerTarget}`);
     return sha256(parts.join("\0"));
   }

@@ -13,11 +13,13 @@ import {
   jsonSchemaCompileError,
   jsonSchemaGraderSchema,
 } from "./graders.js";
+import { isRecord } from "./utils.js";
 
 const classificationSchema = Type.Enum(["capability", "preference"]);
 const nonEmptyStringSchema = Type.String({ minLength: 1, pattern: String.raw`\S` });
 const stringArraySchema = Type.Readonly(Type.Array(Type.String()));
 export const armSchema = Type.Enum(["baseline", "solo"]);
+export const evalTargetSchema = Type.Enum(["skill", "instructions"]);
 
 // These schemas are executable at runtime and are also serialized into schemas/ for editor tooling.
 export const fixtureSchema = Type.ReadonlyObject(
@@ -69,6 +71,14 @@ export const evalCaseSchema = Type.ReadonlyObject(
     mode: Type.Enum(["generation", "trigger"]),
     prompt: nonEmptyStringSchema,
     rule: Type.Optional(Type.String()),
+    rule_text: Type.Optional(
+      Type.String({
+        description:
+          "Verbatim rule span for single-rule ablation (content-addressed; its presence in the instruction file is validated later at run time, not here).",
+        minLength: 1,
+        pattern: String.raw`\S`,
+      }),
+    ),
     should_trigger: Type.Optional(Type.Boolean()),
     trials: Type.Optional(Type.Integer({ maximum: 5, minimum: 1 })),
     type: Type.Optional(classificationSchema),
@@ -81,7 +91,8 @@ export const skillEvalsSchema = Type.ReadonlyObject(
     cases: Type.Readonly(Type.Array(evalCaseSchema)),
     class: classificationSchema,
     fixture: Type.Optional(fixtureSchema),
-    skill: nonEmptyStringSchema,
+    skill: Type.Optional(nonEmptyStringSchema),
+    target: Type.Optional(evalTargetSchema),
   }),
   {
     $id: "https://raw.githubusercontent.com/dungle-scrubs/skillval/main/schemas/skillval.schema.json",
@@ -94,6 +105,7 @@ export const skillEvalsSchema = Type.ReadonlyObject(
 export type Arm = Static<typeof armSchema>;
 export type CaseAssert = Static<typeof caseAssertSchema>;
 export type EvalCase = Static<typeof evalCaseSchema>;
+export type EvalTarget = Static<typeof evalTargetSchema>;
 export type Fixture = Static<typeof fixtureSchema>;
 export type SkillEvals = Static<typeof skillEvalsSchema>;
 
@@ -108,6 +120,7 @@ export class CaseContractError extends Error {
 }
 
 export function parseCaseValue(value: unknown, path: string, expectedSkill?: string): SkillEvals {
+  validateInstructionRequirements(value, path);
   if (!checkSchema(skillEvalsSchema, value)) {
     const [firstError] = schemaErrors(skillEvalsSchema, value);
     const location = firstError?.instancePath.replaceAll("/", ".").replace(/^\./, "");
@@ -122,7 +135,15 @@ export function parseCaseValue(value: unknown, path: string, expectedSkill?: str
     throw new CaseContractError(`${subject} ${firstError?.message ?? "is invalid"}`);
   }
 
-  if (expectedSkill !== undefined && value.skill !== expectedSkill) {
+  const isSkillTarget = value.target === undefined || value.target === "skill";
+  if (isSkillTarget && value.skill === undefined) {
+    throw new CaseContractError(`${path} is missing required "skill"`);
+  }
+  if (!isSkillTarget && value.skill !== undefined) {
+    throw new CaseContractError(`${path} target "instructions" must not declare "skill"`);
+  }
+
+  if (isSkillTarget && expectedSkill !== undefined && value.skill !== expectedSkill) {
     throw new CaseContractError(
       `${path} declares skill "${value.skill}", expected "${expectedSkill}"`,
     );
@@ -136,12 +157,41 @@ export function parseCaseValue(value: unknown, path: string, expectedSkill?: str
       throw new CaseContractError(`${path} case id "${evalCase.id}" is duplicated`);
     }
     ids.add(evalCase.id);
+    if (!isSkillTarget) {
+      if (evalCase.rule_text === undefined || evalCase.rule_text.trim() === "") {
+        throw new CaseContractError(
+          `${path} case "${evalCase.id}" is missing required non-empty "rule_text"`,
+        );
+      }
+      if (evalCase.should_trigger !== undefined) {
+        throw new CaseContractError(
+          `${path} case "${evalCase.id}" target "instructions" must not declare "should_trigger"`,
+        );
+      }
+    }
     validatePatterns(evalCase, path);
     validateGraders(evalCase, path);
     validateJsonSchemaGrader(evalCase, path);
     validateCommandExitGrader(evalCase, path);
   }
   return value;
+}
+
+function validateInstructionRequirements(value: unknown, path: string): void {
+  if (!isRecord(value) || value.target !== "instructions" || !Array.isArray(value.cases)) return;
+  for (const candidate of value.cases) {
+    if (!isRecord(candidate) || typeof candidate.id !== "string") continue;
+    if (typeof candidate.rule_text !== "string" || candidate.rule_text.trim() === "") {
+      throw new CaseContractError(
+        `${path} case "${candidate.id}" is missing required non-empty "rule_text"`,
+      );
+    }
+    if (candidate.should_trigger !== undefined) {
+      throw new CaseContractError(
+        `${path} case "${candidate.id}" target "instructions" must not declare "should_trigger"`,
+      );
+    }
+  }
 }
 
 function validateCommandExitGrader(evalCase: EvalCase, path: string): void {

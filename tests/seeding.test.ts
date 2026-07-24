@@ -1,10 +1,16 @@
-import { existsSync, lstatSync, mkdtempSync, readlinkSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { seedSkills as seedClaudeSkills } from "../src/executors/claude.js";
-import { seedSkills as seedCodexSkills } from "../src/executors/codex.js";
-import { piSkillArgs } from "../src/executors/pi.js";
+import {
+  seedInstruction as seedClaudeInstruction,
+  seedSkills as seedClaudeSkills,
+} from "../src/executors/claude.js";
+import {
+  seedInstruction as seedCodexInstruction,
+  seedSkills as seedCodexSkills,
+} from "../src/executors/codex.js";
+import { piSkillArgs, seedInstruction as seedPiInstruction } from "../src/executors/pi.js";
 
 const directories: string[] = [];
 const makeDir = (): string => {
@@ -45,6 +51,41 @@ describe.each([
     seedSkills(workspace, []);
 
     expect(existsSync(join(workspace, skillsSubdir))).toBe(false);
+  });
+});
+
+describe.each([
+  ["codex", seedCodexInstruction],
+  ["pi", seedPiInstruction],
+  ["claude", seedClaudeInstruction],
+])("%s seedInstruction", (_name, seedInstruction) => {
+  it("writes the resolved content under the filename the runner resolved", () => {
+    const workspace = makeDir();
+
+    seedInstruction(workspace, {
+      content: "- Keep answers concise.\n",
+      filename: "AGENTS.md",
+    });
+
+    expect(readFileSync(join(workspace, "AGENTS.md"), "utf8")).toBe("- Keep answers concise.\n");
+  });
+
+  it("honours a CLAUDE.md filename without translating it", () => {
+    const workspace = makeDir();
+
+    seedInstruction(workspace, { content: "- Be terse.\n", filename: "CLAUDE.md" });
+
+    expect(readFileSync(join(workspace, "CLAUDE.md"), "utf8")).toBe("- Be terse.\n");
+    expect(existsSync(join(workspace, "AGENTS.md"))).toBe(false);
+  });
+
+  it("seeds nothing for a skill-target trial", () => {
+    const workspace = makeDir();
+
+    seedInstruction(workspace, undefined);
+
+    expect(existsSync(join(workspace, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(workspace, "CLAUDE.md"))).toBe(false);
   });
 });
 
