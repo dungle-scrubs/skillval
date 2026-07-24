@@ -218,8 +218,8 @@ export function runEvaluation(
   options: RunOptions,
   log: (message: string) => void,
 ): RunOutcome {
-  const rootDiscovery = discoverSkills(config.roots);
-  const projectDiscovery = discoverProjects(config.projects ?? []);
+  const rootDiscovery = discoverSkills(config.roots, config.exclude ?? []);
+  const projectDiscovery = discoverProjects(config.projects ?? [], config.exclude ?? []);
   const discovery: DiscoveryResult = {
     missingRoots: [...rootDiscovery.missingRoots, ...projectDiscovery.missingRoots],
     skills: [...rootDiscovery.skills, ...projectDiscovery.skills],
@@ -482,8 +482,8 @@ export function planEvaluation(
   options: RunOptions,
   log: (message: string) => void,
 ): RunPlan {
-  const rootDiscovery = discoverSkills(config.roots);
-  const projectDiscovery = discoverProjects(config.projects ?? []);
+  const rootDiscovery = discoverSkills(config.roots, config.exclude ?? []);
+  const projectDiscovery = discoverProjects(config.projects ?? [], config.exclude ?? []);
   const discovery: DiscoveryResult = {
     missingRoots: [...rootDiscovery.missingRoots, ...projectDiscovery.missingRoots],
     skills: [...rootDiscovery.skills, ...projectDiscovery.skills],

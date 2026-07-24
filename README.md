@@ -273,6 +273,18 @@ for headless or CI runs.
 and `$HOME` are expanded. `executor` selects the trial adapter: `codex`, `claude`, or `pi`. Missing roots are skipped during `run`; `list` returns them in
 `missingRoots` with JSON output and prints each as `missing root: <path>` in human output.
 
+`exclude` (optional) omits skills from discovery by **name** - useful for third-party skills
+installed under a root you also own, so you cannot simply drop the root. Patterns match the skill
+name with `*` and `?` glob wildcards; an excluded skill is never discovered, so it is absent from
+`list`, cannot be a `run` target, and is not seeded as a loadout member. Instruction targets are
+addressed by project path, not skill name, so `exclude` does not affect them.
+
+```yaml
+exclude:
+  - impeccable      # a vendored skill that is not mine
+  - vendor-*        # everything from a third-party pack
+```
+
 `projects` (optional) contains **project trees** scanned recursively for
 [instruction files](#instruction-files) and project-scoped skills, each gated by a sibling
 `skillval.yml`:

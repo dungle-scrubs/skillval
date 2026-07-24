@@ -6,6 +6,16 @@
       "enum": ["claude", "codex", "pi"],
       "description": "Trial executor."
     },
+    "exclude": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "description": "Skill names to exclude from discovery; `*` and `?` glob wildcards match against the skill name.",
+      "uniqueItems": true
+    },
     "htmlReport": {
       "type": "boolean",
       "description": "Write and open a self-contained HTML report after each run. Enabled when omitted."

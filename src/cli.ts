@@ -137,8 +137,8 @@ program
     const globalOptions = command.optsWithGlobals() as GlobalOptions & ListOptions;
     const configPath = resolveConfigPath({ cliPath: globalOptions.config });
     const config = loadConfig(configPath);
-    const discovery = discoverSkills(config.roots);
-    const projectDiscovery = discoverProjects(config.projects ?? []);
+    const discovery = discoverSkills(config.roots, config.exclude ?? []);
+    const projectDiscovery = discoverProjects(config.projects ?? [], config.exclude ?? []);
     if (options.json === true) {
       const rootReport = discoveryReport(discovery);
       if (config.projects === undefined) {

@@ -9,6 +9,17 @@ export const configFileSchema = Type.ReadonlyObject(
     executor: Type.Enum(EXECUTOR_NAMES, {
       description: "Trial executor.",
     }),
+    // Skill names to omit from discovery entirely, e.g. third-party skills installed under a root
+    // you also own. Matched against the skill name with `*` and `?` glob wildcards.
+    exclude: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.String({ minLength: 1, pattern: String.raw`\S` }), {
+          description:
+            "Skill names to exclude from discovery; `*` and `?` glob wildcards match against the skill name.",
+          uniqueItems: true,
+        }),
+      ),
+    ),
     // Write a self-contained HTML report beside the JSON one after each run, and open it. Enabled
     // when omitted; set false to keep runs headless (CI, scripted use).
     htmlReport: Type.Optional(
