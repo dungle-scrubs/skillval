@@ -161,23 +161,39 @@ is no assert that legitimately separates them - the honest verdict is "no-op,"
 and the fix is to prune the rule, not to invent a discriminator. Read both arms
 first, every time; propose the change with the evidence; let the user ratify.
 
-## Disposition skills and the held-out prompt
+## Dispositional rules and the held-out prompt
 
-A disposition skill raises the model's default propensity to apply known-good
-practice unasked. The techniques are trained knowledge, so a prompt that names
-one ("add a verbose toggle") gets a pass from both arms - a false no-op. The
-observability skill is the type case: prompting "add structured boundary logging"
-made baseline and solo both pass, because both know how to log. Reframed as a
-held-out prompt - "implement a PaymentClient.charge that POSTs to a gateway" with
-no mention of logging - the skill arm adds a correlation id at the boundary and
-baseline writes plain code. The verdict flips from no-op to load-bearing. Nothing
-about the grader changed; only the prompt stopped leading the witness.
+Disposition is not a kind of rule; it is the *how-it-shows-up* axis, orthogonal
+to capability/preference. A rule is **dispositional** when it should apply by
+default in ordinary work (ahooks in every component, instrumentation in every
+module) and **triggered** when it only matters once the user raises the topic
+("what state library?"). The anchored rule: **a dispositional rule must be tested
+held-out - whether it is a preference or a capability.** The false-no-op trap
+bites both kinds identically.
 
-Author held-out cases across a few ordinary tasks (a pool, a client, a cache, a
-semaphore), each checking one technique's marker, never naming the technique. If
-the skill arm still does not apply the technique, that is a real finding - the
-skill does not instill the disposition strongly enough, or its trigger is too
-narrow to fire on ordinary work.
+The techniques of a dispositional rule are usually trained knowledge, so a prompt
+that names one ("add a verbose toggle") passes both arms - a false no-op.
+observability was the type case on the capability-ish side: prompting "add
+structured boundary logging" passed both arms; held out as "implement a
+PaymentClient.charge that POSTs to a gateway" (no mention of logging), the skill
+arm added a correlation id and baseline did not - flipped to load-bearing.
+standards-react is the type case on the preference side and was authored held-out
+already: "create a debounced search box" -> checks `useDebounce`, never naming
+ahooks. Same axis, same test, different kind of rule.
+
+Two cautions from real runs:
+
+- **Do not over-hold-out a form preference.** `modern-hints` (use `list[` not
+  `List[`) only applies *when annotations exist*. Dropping "typed" from the prompt
+  made the model write no hints at all - nothing to grade. Elicit the context
+  ("type-annotated functions") but keep the tested dimension (modernity) out of
+  the prompt. Naming the *context* is not leading the witness; naming the *tested
+  dimension* is.
+- **Author across a few ordinary tasks**, not one shape - a disposition that only
+  fires on one memorized shape is not a disposition. If the skill arm still does
+  not apply the behavior held-out, that is a real finding: the skill does not
+  instill the disposition strongly enough, or its trigger is too narrow to fire
+  on ordinary work.
 
 ## The barrier: presence, not quality
 
