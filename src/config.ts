@@ -63,6 +63,8 @@ export function loadConfig(path: string, home = homedir()): SkillvalConfig {
 
   return {
     executor: parsed.executor,
+    // Exclusions match skill names, not paths, so they are carried through verbatim.
+    ...(parsed.exclude === undefined ? {} : { exclude: parsed.exclude }),
     ...(parsed.htmlReport === undefined ? {} : { htmlReport: parsed.htmlReport }),
     ...(parsed.loadouts === undefined ? {} : { loadouts: parsed.loadouts }),
     ...(parsed.projects === undefined

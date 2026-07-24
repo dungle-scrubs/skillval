@@ -6,6 +6,7 @@ import {
   discoverProjects,
   discoverSkills,
   discoveryReport,
+  isExcluded,
   selectSkills,
 } from "../src/discovery.js";
 
@@ -100,6 +101,44 @@ describe("project discovery", () => {
       status: "invalid",
       validationError: expect.stringContaining('must not declare "skill"'),
     });
+  });
+});
+
+describe("exclusion", () => {
+  it("matches names by literal and by glob, treating regex metacharacters literally", () => {
+    expect(isExcluded("impeccable", ["impeccable"])).toBe(true);
+    expect(isExcluded("impeccable", ["imp*"])).toBe(true);
+    expect(isExcluded("impeccable", ["im?eccable"])).toBe(true);
+    expect(isExcluded("vendor-lint", ["vendor-*"])).toBe(true);
+    expect(isExcluded("mine", ["impeccable", "vendor-*"])).toBe(false);
+    // A dot is literal, not a regex wildcard: "aXb" must not match the pattern "a.b".
+    expect(isExcluded("aXb", ["a.b"])).toBe(false);
+    expect(isExcluded("a.b", ["a.b"])).toBe(true);
+  });
+
+  it("omits excluded skills from root discovery entirely", () => {
+    const root = createRoot();
+    createSkill(root, "mine", "skill: mine\nclass: capability\ncases: []\n");
+    createSkill(root, "impeccable", "skill: impeccable\nclass: capability\ncases: []\n");
+
+    const discovery = discoverSkills([root], ["impeccable"]);
+
+    expect(discovery.skills.map((skill) => skill.name)).toEqual(["mine"]);
+  });
+
+  it("omits excluded project-scoped skills while leaving instruction targets intact", () => {
+    const root = createRoot();
+    const projectBase = basename(root);
+    createInstructionTarget(root, "AGENTS.md");
+    createSkill(join(root, ".claude/skills"), "mine", normalSkillCaseFile("mine"));
+    createSkill(join(root, ".claude/skills"), "vendor-x", normalSkillCaseFile("vendor-x"));
+
+    const discovery = discoverProjects([root], ["vendor-*"]);
+
+    expect(discovery.skills.map((skill) => skill.name)).toEqual(["mine"]);
+    expect(discovery.instructions.map((instruction) => instruction.id)).toEqual([
+      `${projectBase}:.`,
+    ]);
   });
 });
 

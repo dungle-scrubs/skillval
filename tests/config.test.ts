@@ -73,6 +73,22 @@ describe("configuration paths", () => {
     }
   });
 
+  it("carries exclude patterns through verbatim without path expansion", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-test-"));
+    const path = resolve(directory, "config.yml");
+    writeFileSync(path, "executor: codex\nexclude: [impeccable, vendor-*]\nroots: [~/skills]\n");
+
+    try {
+      expect(loadConfig(path, "/Users/example")).toEqual({
+        exclude: ["impeccable", "vendor-*"],
+        executor: "codex",
+        roots: ["/Users/example/skills"],
+      });
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
   it("rejects unknown configuration fields", () => {
     const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-test-"));
     const path = resolve(directory, "config.yml");

@@ -108,7 +108,25 @@ export type DiscoverySkillSummary =
   | Omit<ReadyDiscoveredSkill, "evals">
   | Exclude<DiscoveredSkill, ReadyDiscoveredSkill>;
 
-export function discoverSkills(roots: readonly string[]): DiscoveryResult {
+// A skill name is excluded when it matches any configured glob pattern (`*`, `?`). Filtering by
+// name at discovery keeps `list`, `run`, and loadout-member lookup consistent: an excluded skill
+// is simply never discovered, so it cannot be listed, targeted, or seeded.
+export function isExcluded(name: string, exclude: readonly string[]): boolean {
+  return exclude.some((pattern) => globToRegExp(pattern).test(name));
+}
+
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("*", ".*")
+    .replaceAll("?", ".");
+  return new RegExp(`^${escaped}$`);
+}
+
+export function discoverSkills(
+  roots: readonly string[],
+  exclude: readonly string[] = [],
+): DiscoveryResult {
   const missingRoots: string[] = [];
   const skills: DiscoveredSkill[] = [];
 
@@ -122,6 +140,7 @@ export function discoverSkills(roots: readonly string[]): DiscoveryResult {
       .filter((entry) => entry.isDirectory())
       .sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
+      if (isExcluded(entry.name, exclude)) continue;
       const skillDirectory = join(root, entry.name);
       if (!existsSync(join(skillDirectory, "SKILL.md"))) continue;
       skills.push(describeSkill(entry.name, root, skillDirectory));
@@ -131,7 +150,10 @@ export function discoverSkills(roots: readonly string[]): DiscoveryResult {
   return { missingRoots, skills };
 }
 
-export function discoverProjects(projects: readonly string[]): ProjectDiscoveryResult {
+export function discoverProjects(
+  projects: readonly string[],
+  exclude: readonly string[] = [],
+): ProjectDiscoveryResult {
   const instructions: DiscoveredInstruction[] = [];
   const missingRoots: string[] = [];
   const skills: DiscoveredSkill[] = [];
@@ -146,8 +168,11 @@ export function discoverProjects(projects: readonly string[]): ProjectDiscoveryR
   }
 
   instructions.sort((left, right) => left.id.localeCompare(right.id));
-  skills.sort((left, right) => left.name.localeCompare(right.name));
-  return { instructions, missingRoots, skills };
+  // Exclusion applies to project-scoped skills too; instruction targets are addressed by project
+  // path, not skill name, so they are unaffected.
+  const included = skills.filter((skill) => !isExcluded(skill.name, exclude));
+  included.sort((left, right) => left.name.localeCompare(right.name));
+  return { instructions, missingRoots, skills: included };
 }
 
 export function discoveryReport(discovery: DiscoveryResult): DiscoveryReport {
