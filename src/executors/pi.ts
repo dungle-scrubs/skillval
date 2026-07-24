@@ -133,12 +133,20 @@ export class PiExecutor implements Executor {
         cwd: request.workspace,
         encoding: "utf8",
         env: environment,
+        // Close pi's stdin (empty input -> immediate EOF). pi's -p mode blocks reading stdin when
+        // it is an open non-TTY pipe, which under spawnSync hangs the trial until the timeout kills
+        // it (SIGTERM). Equivalent to running `pi -p ... </dev/null`.
+        input: "",
         maxBuffer: 64 * 1024 * 1024,
         timeout: TRIAL_TIMEOUT_MS,
       },
     );
-    if (result.status !== 0) {
-      throw new Error(`pi -p exited ${result.status}: ${result.stderr?.slice(-500)}`);
+    if (result.status !== 0 || result.signal !== null) {
+      // stderr is often empty on a pi crash; fall back to stdout and name the signal so a timeout
+      // (SIGTERM) is not mistaken for a fast exit.
+      const detail = result.stderr?.trim() || result.stdout?.slice(-500)?.trim() || "(no output)";
+      const how = result.signal !== null ? `killed by ${result.signal}` : `exited ${result.status}`;
+      throw new Error(`pi -p ${how}: ${detail}`);
     }
 
     const trace = parsePiTrace(result.stdout, request.skillName);
