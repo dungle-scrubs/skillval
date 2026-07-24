@@ -568,8 +568,28 @@ natively, with no filename translation, and pi additionally redirects `PI_CODING
 user-global `AGENTS.md`/`CLAUDE.md` would enter every arm and could make the `peers` arm pass,
 misreporting the target rule as redundant.
 
+## Bundled skill
+
+skillval ships one agent skill of its own, under `skill/skillval-coverage/`. It is the judgment
+layer the deterministic tooling cannot provide: pointed at the skills skillval discovers, it audits
+which rules are under-tested, classifies each rule capability-vs-preference, ranks the real gaps by
+decay risk rather than by case count, and coaches the keep / write / stop decision - including the
+single filter that governs it, *can you name a future in which this case flips to fail?* It
+diagnoses and advises; it does not write or run cases (that is the assisted-authoring skill below).
+
+It is not auto-installed. After installing skillval, make the bundled directory discoverable to your
+agent by symlinking it onto a skill path both skillval's CLI and your harness can see, e.g.:
+
+```sh
+ln -s "$(npm root -g)/@dungle-scrubs/skillval/skill/skillval-coverage" ~/.agents/skills/skillval-coverage
+```
+
+The skill carries its own `skillval.yml`, so skillval can evaluate the skill it ships.
+
 ## Roadmap
 
+- Add a `skillval skill install` command that symlinks the bundled skill onto a discoverable path,
+  replacing the manual step above.
 - Support multi-executor runs through the same normalized trace interface, now that `codex` and
   `claude` adapters share it.
 - Run multiple models and emit per-model reports. A passing binding or trigger result on a weaker

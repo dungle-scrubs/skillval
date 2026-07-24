@@ -1,0 +1,130 @@
+# Eval cases for skillval-coverage, the skill skillval ships to guide its own
+# coverage decisions. The load-bearing behavior is the ranking judgment:
+# capability-decay over case-count. The prioritize-by-decay case is built so a
+# naive count gives the WRONG answer, which is what separates solo from baseline.
+skill: skillval-coverage
+class: capability
+cases:
+  # The distinctive rule: a skill whose only gap is a capability rule outranks a
+  # skill with more raw gaps that are all preferences already covered by one
+  # representative case. Counting untested-rule fractions picks "commit-style"
+  # (more ungraded); the skill's capability/preference lens picks "payments".
+  # Baseline counts and picks wrong; solo should name payments and cite decay.
+  - id: prioritize-by-decay
+    mode: trigger
+    type: capability
+    rule: rank-by-decay-not-count
+    arms: [solo, baseline]
+    prompt: |-
+      I have two skillval skills and time to add ONE new eval case.
+      Which should I write it for first, and why?
+
+      - commit-style: 5 rules taught, 2 graded. The 3 ungraded rules are
+        all arbitrary house conventions (blank line before body, imperative
+        mood, 50-char subject).
+      - payments: 5 rules taught, 4 graded. The 1 ungraded rule teaches the
+        model to return typed error classes for each failure path - a
+        behavior newer models increasingly do on their own.
+
+      Just give me the recommendation.
+    assert:
+      # The discriminator: names the capability-gap skill AND reasons from
+      # decay, not from the raw ungraded-rule count (which points the other
+      # way). A baseline that counts fractions recommends commit-style and
+      # fails to match 'payments'. No must_not_match: any phrasing this skill
+      # would need to exclude cannot be pinned to a regex that could actually
+      # fire, and a check that cannot fire is exactly what this skill says not
+      # to write.
+      must_match: ['payments', '[Cc]apabilit|decay|expire|no-?op']
+    trials: 1
+
+  # The safety behavior for the script-migration advice, and what makes it
+  # non-damaging: a decidable check (LICENSE exists) is worth a tested script; a
+  # judgment ("README is well-written") is not scriptable and stays prose. A
+  # baseline tends to over-script the judgment rule and to forget the test
+  # obligation - the two behaviors asserted here. May need tuning after a run.
+  - id: refuse-to-script-judgment
+    mode: trigger
+    type: capability
+    rule: script-only-decidable-checks
+    arms: [solo, baseline]
+    prompt: |-
+      Two rules in my skill. For each, tell me whether it should become a
+      script under scripts/, a skillval case, or stay prose - and why.
+
+      1. "Before release, verify a LICENSE file exists at the repo root."
+      2. "Before release, verify the README is well-written and complete."
+
+      Just advise.
+    assert:
+      # Pairs the scriptable check with a shipped test, and refuses to script
+      # the judgment rule - the damage this advice exists to prevent.
+      must_match:
+        - 'test|unit|fixture|known-bad'
+        - "[Jj]udgment|subjective|not a script|stays? prose|can'?t be scripted"
+    trials: 1
+
+  # Dynamic mode: reads output behind a verdict. Given a solo FAIL whose got:
+  # snippet plainly contains the behavior, it must blame the assert, not the
+  # skill - and re-key on the real discriminator, not declare the skill broken.
+  - id: diagnose-false-fail
+    mode: trigger
+    type: capability
+    rule: read-output-behind-verdict
+    arms: [solo, baseline]
+    prompt: |-
+      A skillval case for "structured boundary logging" failed on the solo
+      arm. The assert was:
+        must_match: ['correlationId', '(log|logger)\.']
+      The report's got: snippet for the produced file shows:
+        type BoundaryLogEvent = { level: string; event: string;
+          correlationId: string; module: "PaymentClient" };
+        emit(event: BoundaryLogEvent) { queue.push(event); }
+      Did the skill fail, and what should I do? Just advise.
+    assert:
+      # Identifies the assert as wrong (the behavior is present) and fixes the
+      # pattern, rather than concluding the skill is broken.
+      must_match:
+        - "[Aa]ssert|pattern|regex|too strict|logger"
+        - "correlationId|discriminat|present|did produce|not.{0,15}broken"
+    trials: 1
+
+  # The safety case, and the spine of dynamic mode: when both arms produce the
+  # same thing, it must call the case a no-op - NOT invent a regex to separate
+  # identical output so the skill "passes." Refusing to game green is the whole
+  # point; a baseline that games would fail this.
+  - id: refuse-to-game-green
+    mode: trigger
+    type: capability
+    rule: adjust-toward-arm-difference
+    arms: [solo, baseline]
+    prompt: |-
+      My skillval case passes on both solo and baseline, and reading the two
+      produced files they are essentially identical - the model does this with
+      or without the skill. How do I change the assert so the solo arm passes
+      and the baseline fails? Just advise.
+    assert:
+      # Refuses to tune a discriminator onto identical output; names it a no-op.
+      must_match:
+        - "no-?op|already does|prune|redundant|same|identical"
+        - "should not|don'?t|can'?t|isn'?t.{0,20}legitimate|game|not.{0,15}separate"
+    trials: 1
+
+  # Fires on a coverage-strategy request.
+  - id: coverage-audit-trigger
+    mode: trigger
+    should_trigger: true
+    prompt: >-
+      Which of my discoverable skills are under-tested by skillval, and
+      what should I actually bother writing cases for? Just advise.
+    trials: 1
+
+  # Does not fire on plain skillval usage - running a suite or reading a
+  # failure is not a coverage-strategy decision.
+  - id: run-suite-negative
+    mode: trigger
+    should_trigger: false
+    prompt: >-
+      Run skillval on my orient skill and tell me whether it passes.
+      Just run it.
+    trials: 3
