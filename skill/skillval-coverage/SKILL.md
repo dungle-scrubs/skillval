@@ -92,27 +92,39 @@ cases. A fat, capability-heavy skill that grades one of six techniques is badly
 under-covered even though it "has cases." Thinness is not the signal; untested
 capability is.
 
-## Disposition skills, and the held-out prompt
+## Two axes: what a rule is, and how it shows up
 
-There is a third archetype beyond capability and preference: a **disposition**
-skill, whose job is not a missing capability or an arbitrary choice, but raising
-the model's default *propensity* to apply known-good practice unasked, in
-ordinary work - observability everywhere, typed errors everywhere, tests
-everywhere. The model is trained on these; the skill is about willingness to
-reach for them by default.
+Capability and preference answer *what kind of rule* it is - does the model lack
+the ability, or just default to a different choice. A second, **orthogonal** axis
+answers *how the rule's value shows up, and therefore how you test it* -
+disposition is not a third archetype, it is this second axis:
 
-For a disposition skill, a direct-prompt no-op is a **false no-op.** If the
-prompt names the behavior - "add a verbose toggle," "add structured logging" -
-the model does it because it is trained to, both arms pass, and you conclude the
-skill adds nothing. You measured capability-when-told, not disposition-by-default.
+- **Triggered** - the rule only matters when the user raises the topic. "What
+  state library should I use?" -> Zustand. You legitimately name the topic in the
+  prompt and check the answer.
+- **Dispositional** - the rule should apply by default, unasked, in ordinary
+  work. "Use ahooks' hooks," "instrument every module," "return typed errors."
+  The user is not asking about it; it should just appear.
 
-The rule, anchored: **use a held-out prompt.** Never name the behavior in the
-prompt; ask for the surrounding ordinary task ("implement a payment client that
-charges a card") and check whether the behavior appears anyway. Naming it *leads
-the witness*. Baseline writes plain code; the skill arm applies the practice by
-default. To test "in everything," the case set should span a few different
-ordinary tasks, not one memorized module shape - a disposition that only fires on
-one shape is not a disposition.
+Every rule sits on both axes, independently. `ahooks-over-raw` is a *preference*
+that is *dispositional* (you want it in every component). `instrument-every-
+module` is a *capability-ish practice* that is *dispositional*. `what-state-
+library` is a *preference* that is *triggered*.
+
+**The anchored rule: a dispositional rule must be tested with a held-out prompt -
+whether it is a preference or a capability.** Never name the behavior; ask for
+the ordinary surrounding task ("implement a payment client that charges a card")
+and check whether the behavior appears anyway. Naming it *leads the witness*,
+both arms pass, and you get a **false no-op** - the skill looks useless when it
+is not. The trap is not about the *kind* of rule; it bites preferences and
+capabilities identically: observability (capability-ish practices) and
+standards-react (preferences) had the same failure mode - a leading prompt - and
+the same fix - hold it out. A *triggered* rule is correctly tested by naming the
+topic, because the user really does raise it.
+
+To test "in everything," a dispositional case set should span a few different
+ordinary tasks, not one memorized shape - a disposition that only fires on one
+shape is not a disposition.
 
 ## When a rule belongs in a script, not a case
 
