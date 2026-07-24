@@ -41,7 +41,7 @@ program
   .name("skillval")
   .description("Evaluate agent skills with deterministic graders")
   .configureHelp({ showGlobalOptions: true })
-  .version("0.3.0") // x-release-please-version
+  .version("0.4.0") // x-release-please-version
   .option("--config <path>", "read configuration from this path");
 
 program
