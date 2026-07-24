@@ -61,8 +61,11 @@ candidate case before anything else.
    decay risk and decision value, **not** by which skills look thin (see the
    ranking rule below).
 5. **Guide the decisions.** For each real gap, walk the user through keep /
-   write / skip using the stopping rules. Then surface interference and boundary
-   gaps. Present a ranked table and a short do-next list.
+   write / skip using the stopping rules - and flag any rule that is really a
+   deterministic check, which is better moved to a tested script than written as
+   a case (see "When a rule belongs in a script" below). Then surface
+   interference and boundary gaps. Present a ranked table and a short do-next
+   list.
 
 ## Capability vs preference (the axis that drives everything)
 
@@ -81,6 +84,41 @@ Consequence: a thin, preference-heavy standards skill can be *done* at 3-5
 cases. A fat, capability-heavy skill that grades one of six techniques is badly
 under-covered even though it "has cases." Thinness is not the signal; untested
 capability is.
+
+## When a rule belongs in a script, not a case
+
+Some rules are not model judgment at all - they are deterministic checks the
+skill happens to state in prose: "verify a LICENSE file exists", "the CI trigger
+is pull_request-only", "publishConfig.access is public". These do not need a
+skillval case and are not the skill's real value. They belong in a script the
+skill ships under `scripts/`, with a unit test - which is *more* testable than
+any behavioral case, because the answer is deterministic instead of a model
+behavior you grade across trials. Suggest the rewrite: it improves testability
+and removes the rule from the flaky eval surface entirely.
+
+This is a suggestion to improve testability, not a mandate to restructure the
+skill - skillval does not rewrite skills for their own sake. Recommend moving a
+rule to a script only when it clears every gate:
+
+- **Decidable** - a definite right answer from inspecting state, not a judgment.
+  "Does the README have an Install heading" is decidable; "is the README good"
+  is not. The regex-able proxy is not the real question, and scripting it
+  launders a judgment into a checkbox.
+- **Stable** - what the script inspects drifts slower than the script will be
+  maintained. File shapes and config fields qualify; a remote API's responses
+  do not - they rot silently green.
+- **Testable** - you can name the input the script must catch and fail on, and
+  that test ships with the script. If you cannot name the failing input, the
+  rule is not understood well enough to script; it stays prose.
+- **Detection or a literal fix only** - never suggest scripting "author",
+  "decide", or "improve".
+
+The caveat that makes this advice safe: **a wrong script is worse than an
+untested prose rule.** Prose poses a question the model may answer well; a bad
+script closes the question with a green checkmark that stops anyone looking
+again. So default to leaving prose alone, pair every script suggestion with the
+test the script must ship, and when a rule fails any gate say so plainly and
+leave it as prose. Never suggest scripting a judgment call.
 
 ## Stopping rules
 

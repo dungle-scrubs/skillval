@@ -80,3 +80,29 @@ runs a dozen skills at once. Group mode (`--loadout`) runs `solo` / `group` /
 presence is what breaks the case. For any set of skills the user always loads
 together, one group case is worth more than another per-rule behavioral case,
 because it covers a failure mode that has no coverage at all today.
+
+## Prose, script, or case: the third triage bucket
+
+Capability and preference are not the only fates of a rule. A third kind is not
+skill judgment at all - a deterministic check the skill states in prose ("a
+LICENSE exists", "the CI trigger is pull_request-only"). For these, the best
+move is neither a skillval case nor better prose: ship a script under `scripts/`
+with a unit test. That is strictly more testable than a behavioral case, because
+the answer is deterministic rather than a model behavior graded across trials,
+and the rule leaves the flaky eval surface entirely.
+
+Before recommending it, run the four gates in `SKILL.md`. The gate that does the
+real work is **testability**: can you name the input the script must catch and
+fail on? If not, the check is not understood well enough to script - it stays
+prose. A scripted check that ships without a test has not solved the
+untested-rule problem, it has moved it and added false authority.
+
+The discipline is conservative by construction, because the failure is
+asymmetric. A missing test on a prose rule is a known gap. A wrong script is a
+*hidden* gap wearing a green checkmark: it answers a question that was open,
+closes it incorrectly, and stops anyone from looking again. So the default is
+"leave the prose," a rule earns its way to a script by clearing every gate with
+a test attached, and a judgment call ("is the README good", "is this the right
+license") never becomes a script no matter how regex-able a proxy for it looks.
+Scripting the proxy launders a judgment into a checkbox - the most damaging move
+this advice can make, and the one it exists to prevent.

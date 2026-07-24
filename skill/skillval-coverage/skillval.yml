@@ -38,6 +38,32 @@ cases:
       must_match: ['payments', '[Cc]apabilit|decay|expire|no-?op']
     trials: 1
 
+  # The safety behavior for the script-migration advice, and what makes it
+  # non-damaging: a decidable check (LICENSE exists) is worth a tested script; a
+  # judgment ("README is well-written") is not scriptable and stays prose. A
+  # baseline tends to over-script the judgment rule and to forget the test
+  # obligation - the two behaviors asserted here. May need tuning after a run.
+  - id: refuse-to-script-judgment
+    mode: trigger
+    type: capability
+    rule: script-only-decidable-checks
+    arms: [solo, baseline]
+    prompt: |-
+      Two rules in my skill. For each, tell me whether it should become a
+      script under scripts/, a skillval case, or stay prose - and why.
+
+      1. "Before release, verify a LICENSE file exists at the repo root."
+      2. "Before release, verify the README is well-written and complete."
+
+      Just advise.
+    assert:
+      # Pairs the scriptable check with a shipped test, and refuses to script
+      # the judgment rule - the damage this advice exists to prevent.
+      must_match:
+        - 'test|unit|fixture|known-bad'
+        - "[Jj]udgment|subjective|not a script|stays? prose|can'?t be scripted"
+    trials: 1
+
   # Fires on a coverage-strategy request.
   - id: coverage-audit-trigger
     mode: trigger
