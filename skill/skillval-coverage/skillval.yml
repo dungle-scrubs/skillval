@@ -1,0 +1,58 @@
+# Eval cases for skillval-coverage, the skill skillval ships to guide its own
+# coverage decisions. The load-bearing behavior is the ranking judgment:
+# capability-decay over case-count. The prioritize-by-decay case is built so a
+# naive count gives the WRONG answer, which is what separates solo from baseline.
+skill: skillval-coverage
+class: capability
+cases:
+  # The distinctive rule: a skill whose only gap is a capability rule outranks a
+  # skill with more raw gaps that are all preferences already covered by one
+  # representative case. Counting untested-rule fractions picks "commit-style"
+  # (more ungraded); the skill's capability/preference lens picks "payments".
+  # Baseline counts and picks wrong; solo should name payments and cite decay.
+  - id: prioritize-by-decay
+    mode: trigger
+    type: capability
+    rule: rank-by-decay-not-count
+    arms: [solo, baseline]
+    prompt: |-
+      I have two skillval skills and time to add ONE new eval case.
+      Which should I write it for first, and why?
+
+      - commit-style: 5 rules taught, 2 graded. The 3 ungraded rules are
+        all arbitrary house conventions (blank line before body, imperative
+        mood, 50-char subject).
+      - payments: 5 rules taught, 4 graded. The 1 ungraded rule teaches the
+        model to return typed error classes for each failure path - a
+        behavior newer models increasingly do on their own.
+
+      Just give me the recommendation.
+    assert:
+      # The discriminator: names the capability-gap skill AND reasons from
+      # decay, not from the raw ungraded-rule count (which points the other
+      # way). A baseline that counts fractions recommends commit-style and
+      # fails to match 'payments'. No must_not_match: any phrasing this skill
+      # would need to exclude cannot be pinned to a regex that could actually
+      # fire, and a check that cannot fire is exactly what this skill says not
+      # to write.
+      must_match: ['payments', '[Cc]apabilit|decay|expire|no-?op']
+    trials: 1
+
+  # Fires on a coverage-strategy request.
+  - id: coverage-audit-trigger
+    mode: trigger
+    should_trigger: true
+    prompt: >-
+      Which of my discoverable skills are under-tested by skillval, and
+      what should I actually bother writing cases for? Just advise.
+    trials: 1
+
+  # Does not fire on plain skillval usage - running a suite or reading a
+  # failure is not a coverage-strategy decision.
+  - id: run-suite-negative
+    mode: trigger
+    should_trigger: false
+    prompt: >-
+      Run skillval on my orient skill and tell me whether it passes.
+      Just run it.
+    trials: 3

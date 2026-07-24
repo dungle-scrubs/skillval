@@ -1,0 +1,82 @@
+# Coverage decisions: granularity, examples, and reasoning
+
+Load this when you need to decide what counts as a rule, or want the worked
+examples behind the stopping rules in `SKILL.md`.
+
+## What counts as a distinct rule
+
+A rule is the atomic unit you could write **one** behavioral case against - a
+directive that could independently be load-bearing or a no-op. Be disciplined:
+
+- **Count** each specific directive that changes what the model produces:
+  "use uv not pip", "use ruff not black", "use ty for type checking" are three
+  rules.
+- **Do not count** section headers, motivation, background, or examples. A skill
+  that explains a workflow narratively usually has 2-4 real rules, not 20.
+- **Merge** restatements of the same directive scattered across sections into
+  one rule.
+
+When you are unsure whether two directives are one rule or two, ask whether a
+single case could fail for one and pass for the other. If yes, they are two.
+
+## Worked example: the misallocation trap
+
+`observability` teaches six techniques - inspectable state, structured boundary
+logs, typed errors, a verbose toggle, internal invariants, boundary tracing -
+and grades exactly one (`inspectable-state`, via one `must_match`). Five
+capability rules are untested. Any of them could silently become native to the
+model and nobody would notice.
+
+Compare a `standards-*` skill: 3-4 preference rules, 3-4 cases, effectively
+complete. It looks similarly "thin" by case count, but it is done and
+observability is not. Ranking by case count would put effort in exactly the
+wrong place. Rank by untested-capability-rules instead.
+
+## Worked example: a case that could not fail
+
+A review-cleanup case once asserted only that narrating comments were deleted.
+Every model deletes obvious narrating comments unprompted, so `solo` and
+`baseline` both passed - the case tested the model, not the skill, and passed
+for weeks while proving nothing. It became a real test only when it was
+restructured to grade the skill's *distinctive* behavior: given one staged file
+and one committed file both carrying narrating comments, clean the staged change
+and leave the unchanged committed file alone. Now an over-reaching cleanup fails
+`must_match` on the committed file - the case can fail, so it means something.
+
+The lesson: grade the behavior that is *distinctive to the skill*, not the
+behavior any competent model already has. If you cannot find a distinctive
+behavior a deterministic grader can see, that is a signal to stop, not to write
+a weaker case.
+
+## Why "can it fail?" is the master filter
+
+Every other stopping rule is a special case of it:
+
+- "Do not test the model" = the case cannot fail because baseline already passes.
+- "Stop at the edge of determinism" = the case cannot fail *meaningfully*
+  because the grader only sees shape, and correct-shape/wrong-content passes.
+- "Preferences need only one case" = additional preference cases cannot fail in
+  a new way; they re-assert the same guessable-vs-not fact.
+
+If you can state the concrete input and model behavior that would make the case
+go red, it is worth writing. If you cannot, adding it just grows the trial bill
+and the green-checkmark comfort without adding coverage.
+
+## The no-op verdict is model-specific
+
+A rule that passes at `baseline` on a strong model may be load-bearing on a
+weaker one. A rule is a true prune candidate only when every model in the user's
+normal rotation passes it at baseline. Before recommending a deletion, check
+whether the no-op was observed across the executors the user actually runs
+(codex, claude, pi), not just one. Recommend re-running the case on the other
+executors rather than pruning on a single data point.
+
+## Interference is the coverage class everyone skips
+
+Solo cases measure a skill alone. They cannot see a skill that quietly degrades
+a neighbor when both are loaded - the exact situation of real use, where a user
+runs a dozen skills at once. Group mode (`--loadout`) runs `solo` / `group` /
+`peers` and attributes interference to the target only when the target's
+presence is what breaks the case. For any set of skills the user always loads
+together, one group case is worth more than another per-rule behavioral case,
+because it covers a failure mode that has no coverage at all today.
