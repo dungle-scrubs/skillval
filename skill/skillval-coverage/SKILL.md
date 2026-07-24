@@ -1,6 +1,6 @@
 ---
 name: skillval-coverage
-description: "Audit eval coverage for the agent skills skillval discovers and decide what is worth testing. Use when the user asks which skills or rules need skillval cases, wants to find eval gaps or coverage opportunities, asks whether a particular rule is worth a case, or wants to spot stale cases to prune. Guides the keep / prune / stop decisions; it diagnoses and coaches, it does not write or run case files."
+description: "Audit eval coverage for the agent skills skillval discovers and decide what is worth testing, and diagnose ineffective tests by reading run output. Use when the user asks which skills or rules need skillval cases, wants to find eval gaps or coverage opportunities, asks whether a particular rule is worth a case, wants to spot stale cases to prune, or asks why a case failed / passed / whether a verdict can be trusted / how to fix a flaky or misleading case. Guides the keep / prune / stop and fix-the-case decisions; it diagnoses and proposes, it does not silently rewrite or run case files."
 metadata:
   icon: 🎯
 ---
@@ -16,6 +16,13 @@ This skill exists because "add more tests" is the wrong instinct for skill
 evals. Most coverage effort gets misallocated to the skills that look thin
 rather than the ones that are actually under-defended. The job here is to find
 the real gaps and stop at the point where another case would prove nothing.
+
+It has two modes. **Static** (before running): audit which rules are tested,
+rank the gaps, guide keep / write / stop - the sections below through "Output."
+**Dynamic** (after running): read the run output and find *ineffective* tests -
+cases whose pass/fail verdict does not reflect whether the skill works - and
+propose the fix. An ineffective test is worse than a missing one: it hands you
+false confidence. See "Watching output."
 
 ## What a case defends
 
@@ -152,6 +159,52 @@ and the trigger/boundary is pinned. Past that point, more cases are ceremony.
   candidate the user has evidence for - call these out as deletions to consider,
   remembering the no-op verdict is model-specific (confirm across the executors
   they actually use before pruning).
+
+## Watching output: fixing ineffective tests
+
+After a run, the pass/fail column is not the finding - it is the *starting
+point*. An ineffective test is one whose verdict does not reflect whether the
+skill works: a broken assert that fails a case the skill actually passed, a
+loose assert that passes without the behavior, an executor crash recorded as a
+grading failure, a case that can never fail. The report skillval writes carries
+the evidence to tell them apart: on a failed `must_match` the check `detail`
+includes the `got:` snippet of what was graded, plus the trace and the
+invocation evidence. Read it. Never trust a verdict you have not looked behind.
+
+**The guardrail, which is the whole safety of this mode:** adjust an assert
+toward the difference you can *see* between the `solo` and `baseline` output -
+never toward making an arm turn green. Read *both* arms before changing
+anything. If `solo` and `baseline` produced the same thing, the honest verdict
+is "no-op," not "find a regex that only `solo` happens to hit." An assert tuned
+to pass is worse than one that fails honestly - it is the false-verdict failure,
+now baked into the suite. Fixing a false verdict and gaming a test look
+identical from the diff; only the direction of the adjustment tells them apart.
+
+Which verdicts to read behind, and what each usually means:
+
+- **`solo` fail** - real skill gap, or a broken assert? Read the `got:`. If the
+  produced output contains the behavior and the pattern missed it, the assert is
+  wrong, not the skill. Re-key it on what actually differs between the arms.
+- **`solo` fail + `baseline` pass** ("the skill did worse") - almost never real.
+  Suspect a broken assert or a contaminated `baseline` (a prompt that names the
+  skill's install path, so the baseline arm reads the real skill). Fix the
+  prompt to name the skill, not a path.
+- **A `run`/process failure** - the executor crashed; this is infrastructure,
+  not a grading result. Do not edit the case - retry the trial (raise `trials`
+  so a transient crash is outvoted, or re-run). Never "fix" a case to work
+  around a crash.
+- **Both arms pass (no-op)** - before trusting the prune signal, confirm the
+  marker reflects the behavior and is not a trivial match, and that `baseline`
+  is not contaminated. A false pass hides a real gap the way a false fail hides
+  real coverage.
+- **A case that never fails across runs** - a can't-fail case (see "The one
+  test"). Its assert does not discriminate; restructure it so a failing future
+  exists, or retire it.
+
+Diagnose the category, then **propose** the adjustment with the `got:` evidence
+attached, so the user can see why. Apply on their confirmation; do not silently
+rewrite asserts. See [references/decisions.md](references/decisions.md) for the
+catalog of ineffective-test types and worked examples.
 
 ## Output
 

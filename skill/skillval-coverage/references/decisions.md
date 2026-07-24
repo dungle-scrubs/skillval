@@ -106,3 +106,57 @@ a test attached, and a judgment call ("is the README good", "is this the right
 license") never becomes a script no matter how regex-able a proxy for it looks.
 Scripting the proxy launders a judgment into a checkbox - the most damaging move
 this advice can make, and the one it exists to prevent.
+
+## The catalog of ineffective tests
+
+An ineffective test is one whose verdict does not track whether the skill works.
+Each type has a tell in the report and a fix, and the fix is always anchored to
+the observed difference between the arms - never to turning an arm green.
+
+**False fail** - the skill produced the behavior, the assert missed it. Tell: a
+`solo` (or both-arm) fail where the `got:` snippet plainly contains the
+behavior. Example: a case for structured boundary logging required both a
+`correlationId` *and* a `logger.` call shape; the model emitted a typed log
+event with a `correlationId` but no `logger.` call, so the assert failed a
+correct solo arm. Fix: drop the spurious requirement, key on the real
+discriminator (the `correlationId`, which the skill adds and baseline omits).
+The corrected case flips to `solo` pass / `baseline` fail - load-bearing.
+
+**False pass** - the marker matched without the behavior. Tell: both arms pass,
+but reading the output shows the marker appears incidentally. Fix: tighten to
+something the behavior necessarily produces. A false pass is more dangerous than
+a false fail because it reports coverage you do not have.
+
+**Contamination** - the `baseline` arm could see the skill, so a no-op verdict
+is fake. Tell: a prompt that names the skill's install path (`Read
+~/.agents/skills/<name>/SKILL.md`), or trace evidence of the baseline reading
+the skill's own file. Fix: name the skill, not a path, so only the seeded arm
+can reach it.
+
+**Infrastructure recorded as grading** - an executor process crashed and the
+trial was scored as a content failure. Tell: a `run` check failure (e.g. `pi -p
+exited 1`), often with empty output. Fix: this is not a case defect - retry the
+trial, raise `trials` so a transient crash is outvoted, or switch to a sandboxed
+executor for that run. Editing the case to "pass" would be gaming a crash.
+
+**Can't-fail** - the case passes regardless of the skill, so it measures
+nothing. Tell: it has never failed across runs, and you cannot name an input
+that would make it fail. Fix: restructure it around a behavior distinctive to
+the skill, or retire it (see "Why 'can it fail?' is the master filter").
+
+## Fixing a false verdict versus gaming a test
+
+These produce identical diffs - both edit an assert - and are opposites. The
+only thing that distinguishes them is what the adjustment is anchored to:
+
+- **Legitimate:** you read *both* arms' output, found a real difference the skill
+  causes, and re-keyed the assert on that difference. The verdict changes because
+  the assert now measures the true behavior.
+- **Gaming:** you tuned the assert until a target arm passed, without a real
+  behavioral difference behind it. `solo` and `baseline` produce the same thing
+  and you found a regex that only one happens to hit.
+
+If `solo` and `baseline` outputs do not differ in a way you can point to, there
+is no assert that legitimately separates them - the honest verdict is "no-op,"
+and the fix is to prune the rule, not to invent a discriminator. Read both arms
+first, every time; propose the change with the evidence; let the user ratify.
