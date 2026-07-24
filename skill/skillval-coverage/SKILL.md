@@ -92,6 +92,28 @@ cases. A fat, capability-heavy skill that grades one of six techniques is badly
 under-covered even though it "has cases." Thinness is not the signal; untested
 capability is.
 
+## Disposition skills, and the held-out prompt
+
+There is a third archetype beyond capability and preference: a **disposition**
+skill, whose job is not a missing capability or an arbitrary choice, but raising
+the model's default *propensity* to apply known-good practice unasked, in
+ordinary work - observability everywhere, typed errors everywhere, tests
+everywhere. The model is trained on these; the skill is about willingness to
+reach for them by default.
+
+For a disposition skill, a direct-prompt no-op is a **false no-op.** If the
+prompt names the behavior - "add a verbose toggle," "add structured logging" -
+the model does it because it is trained to, both arms pass, and you conclude the
+skill adds nothing. You measured capability-when-told, not disposition-by-default.
+
+The rule, anchored: **use a held-out prompt.** Never name the behavior in the
+prompt; ask for the surrounding ordinary task ("implement a payment client that
+charges a card") and check whether the behavior appears anyway. Naming it *leads
+the witness*. Baseline writes plain code; the skill arm applies the practice by
+default. To test "in everything," the case set should span a few different
+ordinary tasks, not one memorized module shape - a disposition that only fires on
+one shape is not a disposition.
+
 ## When a rule belongs in a script, not a case
 
 Some rules are not model judgment at all - they are deterministic checks the
@@ -137,10 +159,19 @@ would make about it. Concretely:
 - **The case must be able to fail** (the test above). No nameable failure -> skip.
 - **Do not test the model instead of the skill.** If `solo` and `baseline` will
   obviously agree, the case measures model ability, not skill effect - skip.
-- **Stop at the edge of determinism.** skillval uses deterministic graders only.
-  Some skill value is un-gradeable without a judge ("is this a *good*
-  orientation" vs "does it have the right shape"). Once an assertion only checks
-  shape, more shape-cases add no confidence - that is a hard stop.
+- **The barrier is quality, not presence.** This is the decision for when a
+  check crosses the line into needing a model judge. A deterministic assertion
+  can only honestly measure *presence* - did the behavior appear (a `debugInfo`
+  method, a correlation id, a typed error class). The moment a verdict depends on
+  *quality* - is it good, appropriate, complete, or distinguishable from a
+  lookalike - it has crossed into judgment, and a regex there returns a false
+  verdict wearing a green checkmark. **The tell you have crossed:** you can name a
+  lookalike the marker also matches - an `assert` that is input validation, not
+  an internal invariant; a `class FooError` that is trivial, not contract-naming.
+  Presence is skillval's territory; quality is the model judge's (roadmap). Until
+  that lands, assert presence where the marker is clean, and leave the quality
+  dimension explicitly flagged rather than faked - do not force a regex across the
+  barrier.
 
 A skill is adequately covered when every capability rule that could decay has a
 case that could catch the decay, every preference has one representative case,

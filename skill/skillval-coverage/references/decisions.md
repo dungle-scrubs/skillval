@@ -160,3 +160,43 @@ If `solo` and `baseline` outputs do not differ in a way you can point to, there
 is no assert that legitimately separates them - the honest verdict is "no-op,"
 and the fix is to prune the rule, not to invent a discriminator. Read both arms
 first, every time; propose the change with the evidence; let the user ratify.
+
+## Disposition skills and the held-out prompt
+
+A disposition skill raises the model's default propensity to apply known-good
+practice unasked. The techniques are trained knowledge, so a prompt that names
+one ("add a verbose toggle") gets a pass from both arms - a false no-op. The
+observability skill is the type case: prompting "add structured boundary logging"
+made baseline and solo both pass, because both know how to log. Reframed as a
+held-out prompt - "implement a PaymentClient.charge that POSTs to a gateway" with
+no mention of logging - the skill arm adds a correlation id at the boundary and
+baseline writes plain code. The verdict flips from no-op to load-bearing. Nothing
+about the grader changed; only the prompt stopped leading the witness.
+
+Author held-out cases across a few ordinary tasks (a pool, a client, a cache, a
+semaphore), each checking one technique's marker, never naming the technique. If
+the skill arm still does not apply the technique, that is a real finding - the
+skill does not instill the disposition strongly enough, or its trigger is too
+narrow to fire on ordinary work.
+
+## The barrier: presence, not quality
+
+The held-out reframe keeps you deterministic - it is still a regex over output,
+measuring *presence*. But presence and quality are different questions, and only
+presence is deterministic:
+
+- **Clean (presence is a faithful proxy):** markers a plain implementation would
+  not spuriously emit - `debugInfo`, `correlationId`, a tracing `span`. Baseline
+  omits them; their presence means the technique was applied. Ship these.
+- **Over the barrier (presence cannot answer):** a marker with a lookalike the
+  regex cannot distinguish. `assert|invariant` matches an input-validation
+  `assert` as readily as an internal invariant - and the skill's whole point is
+  that those are different. `class \w*Error` matches a trivial typed error as
+  readily as one that names the violated contract and preserves the cause. Here
+  presence is ambiguous; the distinction is a judgment.
+
+The decision, per case: ask whether the assertion measures that the behavior
+*appeared* or that it is *good/correct/distinct*. Appeared -> deterministic,
+write it. Good/correct/distinct -> the model judge (roadmap); flag it, do not
+fake it with a regex. Forcing a regex across the barrier is the false-verdict
+failure - a green checkmark on a question it never actually answered.
