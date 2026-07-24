@@ -6,6 +6,10 @@
       "enum": ["claude", "codex", "pi"],
       "description": "Trial executor."
     },
+    "htmlReport": {
+      "type": "boolean",
+      "description": "Write and open a self-contained HTML report after each run. Enabled when omitted."
+    },
     "loadouts": {
       "type": "object",
       "patternProperties": {
@@ -20,6 +24,15 @@
         }
       },
       "description": "Named skill sets: loadout name to the skill names it contains."
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "description": "Project trees scanned recursively for CLAUDE.md/AGENTS.md and project-scoped skills that carry a sibling skillval.yml."
     },
     "roots": {
       "type": "array",

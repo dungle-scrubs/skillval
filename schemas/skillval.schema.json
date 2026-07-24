@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "required": ["cases", "class", "skill"],
+  "required": ["cases", "class"],
   "properties": {
     "cases": {
       "type": "array",
@@ -124,6 +124,12 @@
           "rule": {
             "type": "string"
           },
+          "rule_text": {
+            "type": "string",
+            "description": "Verbatim rule span for single-rule ablation (content-addressed; its presence in the instruction file is validated later at run time, not here).",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
           "should_trigger": {
             "type": "boolean"
           },
@@ -168,6 +174,9 @@
       "type": "string",
       "minLength": 1,
       "pattern": "\\S"
+    },
+    "target": {
+      "enum": ["skill", "instructions"]
     }
   },
   "$id": "https://raw.githubusercontent.com/dungle-scrubs/skillval/main/schemas/skillval.schema.json",

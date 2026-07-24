@@ -1,22 +1,33 @@
 /** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AblationVariants } from "./ablate.js";
+import { AblationError, ablateRule } from "./ablate.js";
 import type { ArmCacheIdentity } from "./cache.js";
 import { ArmCache } from "./cache.js";
 import type { SkillvalConfig } from "./config.js";
 import { resolveStateDirectory } from "./config.js";
-import type { ReadyDiscoveredSkill } from "./discovery.js";
-import { discoverSkills, selectSkills } from "./discovery.js";
+import type {
+  DiscoveredInstruction,
+  DiscoveryResult,
+  ReadyDiscoveredInstruction,
+  ReadyDiscoveredSkill,
+} from "./discovery.js";
+import { discoverProjects, discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
 import type { Executor, ExecutorMetadata } from "./executors/types.js";
 import type { ResolvedFixture } from "./fixture.js";
 import { applyFixture, FixtureSetupError, resolveFixture, selectFixture } from "./fixture.js";
 import { gradeTrial } from "./grade.js";
+import { renderHtmlReport } from "./html-report.js";
+import type { InstructionFileContent } from "./instruction.js";
+import { armInstructionContent, INSTRUCTION_ARMS, resolveRuleFile } from "./instruction.js";
 import { resolveLoadout } from "./loadout.js";
 import type { ArmResult, CaseResult, EvalCase, RuntimeArm, TrialResult } from "./types.js";
 import { loadoutHash, sha256, skillContentHash } from "./utils.js";
-import { groupVerdict, VERDICT_TEXT } from "./verdict.js";
+import type { Verdict } from "./verdict.js";
+import { groupVerdict, INSTRUCTION_VERDICT_TEXT, VERDICT_TEXT } from "./verdict.js";
 import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
 
 export interface RunOptions {
@@ -26,6 +37,7 @@ export interface RunOptions {
   readonly effort?: string;
   readonly loadout?: string;
   readonly model?: string;
+  readonly requestedInstructions: readonly string[];
   readonly requestedSkills: readonly string[];
   readonly skipBaseline: boolean;
   readonly useCache: boolean;
@@ -77,6 +89,7 @@ export interface ReportLoadout {
 
 export interface RunReport {
   readonly executor: ExecutorMetadata;
+  readonly instructions?: Readonly<Record<string, InstructionTargetReport>>;
   // Present in group mode: the loadout that was evaluated, with each member's content hash, so the
   // report fully describes what ran even after the configuration or a peer skill later changes.
   readonly loadout?: ReportLoadout;
@@ -86,6 +99,9 @@ export interface RunReport {
 
 export interface RunOutcome {
   readonly failures: number;
+  // Written beside the JSON report unless the configuration disables it. The CLI opens this.
+  readonly htmlReportPath?: string;
+  readonly instructionFindings: number;
   readonly interferences: number;
   readonly noops: number;
   readonly report: RunReport;
@@ -113,15 +129,48 @@ export interface SkillPlan {
   readonly name: string;
 }
 
+// An instruction case plans the three ablation arms, or none at all when the rule is not visible to
+// this executor - an n/a case spends nothing, and the plan says so rather than hiding it.
+export interface InstructionCasePlan {
+  readonly arms: readonly ArmPlan[];
+  readonly id: string;
+  readonly na: boolean;
+}
+
+export interface InstructionTargetPlan {
+  readonly cases: readonly InstructionCasePlan[];
+  readonly id: string;
+}
+
 // The result of a dry run: what a real run would spend against the current cache, spawning nothing.
 export interface RunPlan {
   readonly armsCached: number;
   readonly armsReused: number;
   readonly armsToRun: number;
   readonly executor: ExecutorMetadata;
+  readonly instructions: readonly InstructionTargetPlan[];
   readonly skills: readonly SkillPlan[];
   readonly trialsMax: number;
   readonly trialsMin: number;
+}
+
+export type InstructionAction = "delete" | "investigate" | "keep" | "review";
+
+export interface InstructionFinding {
+  readonly action: InstructionAction;
+  readonly arms: readonly ArmResult[];
+  readonly caseId: string;
+  readonly file: string;
+  readonly naReason?: string;
+  readonly rule: string | undefined;
+  readonly span: string;
+  readonly verdict: Verdict | "n/a";
+}
+
+export interface InstructionTargetReport {
+  readonly directory: string;
+  readonly findings: readonly InstructionFinding[];
+  readonly id: string;
 }
 
 interface ArmContext {
@@ -145,19 +194,53 @@ interface CaseContext {
   readonly useCache: boolean;
 }
 
+interface InstructionArmContext {
+  readonly cache: ArmCache;
+  readonly content: string;
+  readonly evalCase: EvalCase;
+  readonly executor: Executor;
+  readonly filename: string;
+  readonly fixture: ResolvedFixture | undefined;
+  readonly targetId: string;
+  readonly useCache: boolean;
+}
+
+interface InstructionCaseContext {
+  readonly cache: ArmCache;
+  readonly executor: Executor;
+  readonly files: readonly InstructionFileContent[];
+  readonly target: ReadyDiscoveredInstruction;
+  readonly useCache: boolean;
+}
+
 export function runEvaluation(
   config: SkillvalConfig,
   options: RunOptions,
   log: (message: string) => void,
 ): RunOutcome {
-  const discovery = discoverSkills(config.roots);
-  const selectedSkills = selectSkills(discovery, options.requestedSkills);
-  assertShellAllowed(selectedSkills, options.caseFilter, options.allowShell);
+  const rootDiscovery = discoverSkills(config.roots);
+  const projectDiscovery = discoverProjects(config.projects ?? []);
+  const discovery: DiscoveryResult = {
+    missingRoots: [...rootDiscovery.missingRoots, ...projectDiscovery.missingRoots],
+    skills: [...rootDiscovery.skills, ...projectDiscovery.skills],
+  };
+  const allTargetsRequested =
+    options.requestedInstructions.length === 0 && options.requestedSkills.length === 0;
+  const selectedSkills =
+    allTargetsRequested || options.requestedSkills.length > 0
+      ? selectSkills(discovery, options.requestedSkills)
+      : [];
+  const selectedInstructions =
+    allTargetsRequested || options.requestedInstructions.length > 0
+      ? selectInstructions(projectDiscovery.instructions, options.requestedInstructions)
+      : [];
+  assertShellAllowed(selectedSkills, options.caseFilter, options.allowShell, selectedInstructions);
   assertPiGenerationAcknowledged(
     config.executor,
     selectedSkills,
     options.caseFilter,
     options.allowUnsandboxedPi,
+    selectedInstructions,
   );
   const loadout = resolveRunLoadout(config, options.loadout, discovery, log);
   const executor = createExecutor(config.executor, {
@@ -175,12 +258,34 @@ export function runEvaluation(
     contentHash: skillContentHash(skill.skillDirectory),
     skill,
   }));
-  const runHash = participatingSkillsHash(
+  const instructionInputs = selectedInstructions.map((target) => ({
+    files: readInstructionFiles(target),
+    target,
+  }));
+  const skillRunHash = participatingSkillsHash(
     skillInputs.map(({ contentHash, skill }) => ({ contentHash, name: skill.name })),
     loadout,
   );
+  const targetsHash =
+    instructionInputs.length === 0
+      ? skillRunHash
+      : sha256(
+          `${skillRunHash}\0INSTRUCTIONS\0${instructionInputs
+            .map(({ files, target }) => `${target.id}\0${instructionFilesHash(files)}`)
+            .sort()
+            .join("\0")}`,
+        );
+  // Results are executor-specific (a rule visible to codex can be n/a for claude), so the executor
+  // identity belongs in the report path. Without it, running the same targets under a second
+  // executor silently overwrites the first report.
+  const runHash = sha256(
+    `${targetsHash}\0EXECUTOR\0${executor.metadata.name}\0${executor.metadata.version}\0` +
+      `${executor.metadata.model}\0${executor.metadata.thinking}`,
+  );
+  const instructionReports: Record<string, InstructionTargetReport> = {};
   const skillReports: Record<string, SkillReport> = {};
   let failures = 0;
+  let instructionFindings = 0;
   let noops = 0;
   let interferences = 0;
 
@@ -210,8 +315,40 @@ export function runEvaluation(
     interferences += cases.filter((result) => result.loadout?.verdict === "interference").length;
   }
 
+  for (const { files, target } of instructionInputs) {
+    log(`${target.id} (${target.evals.class}):`);
+    const findings = target.evals.cases
+      .filter((evalCase) => options.caseFilter === undefined || evalCase.id === options.caseFilter)
+      .map((evalCase) =>
+        runInstructionCase(
+          {
+            cache,
+            executor,
+            files,
+            target,
+            useCache: options.useCache,
+          },
+          evalCase,
+          log,
+        ),
+      );
+    instructionReports[target.id] = {
+      directory: target.directory,
+      findings,
+      id: target.id,
+    };
+    const applicable = findings.filter((finding) => finding.verdict !== "n/a");
+    instructionFindings += applicable.length;
+    failures += applicable.filter((finding) => !instructionGroupPassed(finding)).length;
+    noops += applicable.filter((finding) => {
+      const evalCase = target.evals.cases.find((candidate) => candidate.id === finding.caseId);
+      return evalCase !== undefined && instructionFindingIsNoop(finding, evalCase);
+    }).length;
+  }
+
   const report: RunReport = {
     executor: executor.metadata,
+    ...(instructionInputs.length === 0 ? {} : { instructions: instructionReports }),
     ...(loadout === undefined
       ? {}
       : {
@@ -230,7 +367,109 @@ export function runEvaluation(
   const reportPath = join(reportDirectory, `${runHash}.json`);
   mkdirSync(reportDirectory, { recursive: true });
   writeFileSync(reportPath, JSON.stringify(report, null, 2));
-  return { failures, interferences, noops, report, reportPath };
+  // The HTML report is a rendering of the JSON one, so it is written from the same data and never
+  // becomes a second source of truth. Enabled unless the configuration turns it off.
+  let htmlReportPath: string | undefined;
+  if (config.htmlReport !== false) {
+    htmlReportPath = join(reportDirectory, `${runHash}.html`);
+    writeFileSync(
+      htmlReportPath,
+      renderHtmlReport(report, { generatedAt: new Date().toISOString(), reportPath }),
+    );
+  }
+  return {
+    failures,
+    ...(htmlReportPath === undefined ? {} : { htmlReportPath }),
+    instructionFindings,
+    interferences,
+    noops,
+    report,
+    reportPath,
+  };
+}
+
+export function instructionAction(verdict: Verdict | "n/a"): InstructionAction {
+  switch (verdict) {
+    case "load-bearing":
+      return "keep";
+    case "interference":
+      return "review";
+    case "prune":
+    case "redundant":
+      return "delete";
+    default:
+      return "investigate";
+  }
+}
+
+export function createNaInstructionFinding(
+  evalCase: EvalCase,
+  executorName: string,
+): InstructionFinding {
+  const naReason = `rule is not in a file ${executorName} reads ambiently`;
+  return {
+    action: instructionAction("n/a"),
+    arms: [],
+    caseId: evalCase.id,
+    file: "",
+    naReason,
+    rule: evalCase.rule,
+    span: evalCase.rule_text ?? "",
+    verdict: "n/a",
+  };
+}
+
+export function routeRunTargets(arguments_: readonly string[]): {
+  readonly requestedInstructions: readonly string[];
+  readonly requestedSkills: readonly string[];
+} {
+  return {
+    requestedInstructions: arguments_.filter((argument) => argument.includes(":")),
+    requestedSkills: arguments_.filter((argument) => !argument.includes(":")),
+  };
+}
+
+function selectInstructions(
+  instructions: readonly DiscoveredInstruction[],
+  requestedIds: readonly string[],
+): readonly ReadyDiscoveredInstruction[] {
+  const byId = new Map(instructions.map((instruction) => [instruction.id, instruction]));
+  if (requestedIds.length === 0) {
+    return instructions.filter(
+      (instruction): instruction is ReadyDiscoveredInstruction => instruction.status === "ready",
+    );
+  }
+  return requestedIds.map((id) => {
+    const instruction = byId.get(id);
+    if (instruction === undefined) {
+      throw new Error(`instruction target "${id}" not found under configured projects`);
+    }
+    if (instruction.status === "missing") {
+      throw new Error(`instruction target "${id}" has no skillval.yml`);
+    }
+    if (instruction.status === "invalid") {
+      throw new Error(instruction.validationError);
+    }
+    return instruction;
+  });
+}
+
+function readInstructionFiles(
+  target: ReadyDiscoveredInstruction,
+): readonly InstructionFileContent[] {
+  return target.files.map((file) => ({
+    content: readFileSync(join(target.directory, file), "utf8"),
+    file,
+  }));
+}
+
+function instructionFilesHash(files: readonly InstructionFileContent[]): string {
+  return sha256(
+    [...files]
+      .sort((left, right) => left.file.localeCompare(right.file))
+      .map(({ content, file }) => `${file}\0${content.length}\0${content}`)
+      .join("\0"),
+  );
 }
 
 // Predicts what a real run would spend against the current cache without spawning a single trial, so
@@ -243,8 +482,22 @@ export function planEvaluation(
   options: RunOptions,
   log: (message: string) => void,
 ): RunPlan {
-  const discovery = discoverSkills(config.roots);
-  const selectedSkills = selectSkills(discovery, options.requestedSkills);
+  const rootDiscovery = discoverSkills(config.roots);
+  const projectDiscovery = discoverProjects(config.projects ?? []);
+  const discovery: DiscoveryResult = {
+    missingRoots: [...rootDiscovery.missingRoots, ...projectDiscovery.missingRoots],
+    skills: [...rootDiscovery.skills, ...projectDiscovery.skills],
+  };
+  const allTargetsRequested =
+    options.requestedInstructions.length === 0 && options.requestedSkills.length === 0;
+  const selectedSkills =
+    allTargetsRequested || options.requestedSkills.length > 0
+      ? selectSkills(discovery, options.requestedSkills)
+      : [];
+  const selectedInstructions =
+    allTargetsRequested || options.requestedInstructions.length > 0
+      ? selectInstructions(projectDiscovery.instructions, options.requestedInstructions)
+      : [];
   const loadout = resolveRunLoadout(config, options.loadout, discovery, log);
   const executor = createExecutor(config.executor, {
     effort: options.effort,
@@ -255,7 +508,110 @@ export function planEvaluation(
     contentHash: skillContentHash(skill.skillDirectory),
     skill,
   }));
-  return computePlan(skillInputs, loadout, executor.metadata, cache, options);
+  const skillPlan = computePlan(skillInputs, loadout, executor.metadata, cache, options);
+  const instructionPlan = computeInstructionPlan(
+    selectedInstructions.map((target) => ({ files: readInstructionFiles(target), target })),
+    executor.metadata,
+    cache,
+    options,
+  );
+  return {
+    armsCached: skillPlan.armsCached + instructionPlan.armsCached,
+    armsReused: skillPlan.armsReused,
+    armsToRun: skillPlan.armsToRun + instructionPlan.armsToRun,
+    executor: executor.metadata,
+    instructions: instructionPlan.instructions,
+    skills: skillPlan.skills,
+    trialsMax: skillPlan.trialsMax + instructionPlan.trialsMax,
+    trialsMin: skillPlan.trialsMin + instructionPlan.trialsMin,
+  };
+}
+
+// The instruction half of a dry run. Mirrors computePlan: it derives each arm's cache identity the
+// same way runInstructionArm does, so predicted and actual spend can never drift.
+export function computeInstructionPlan(
+  inputs: readonly {
+    readonly files: readonly InstructionFileContent[];
+    readonly target: ReadyDiscoveredInstruction;
+  }[],
+  metadata: ExecutorMetadata,
+  cache: ArmCache,
+  options: Pick<RunOptions, "caseFilter" | "useCache">,
+): {
+  readonly armsCached: number;
+  readonly armsToRun: number;
+  readonly instructions: readonly InstructionTargetPlan[];
+  readonly trialsMax: number;
+  readonly trialsMin: number;
+} {
+  let armsCached = 0;
+  let armsToRun = 0;
+  let trialsMin = 0;
+  let trialsMax = 0;
+  const instructions: InstructionTargetPlan[] = [];
+  const scheduledKeys = new Set<string>();
+
+  for (const { files, target } of inputs) {
+    const cases: InstructionCasePlan[] = [];
+    for (const evalCase of target.evals.cases) {
+      if (options.caseFilter !== undefined && evalCase.id !== options.caseFilter) continue;
+      const span = evalCase.rule_text ?? "";
+      const home = resolveRuleFile(metadata.name, files, span);
+      const source = files.find((entry) => entry.file === home);
+      if (home === undefined || source === undefined) {
+        cases.push({ arms: [], id: evalCase.id, na: true });
+        continue;
+      }
+      let variants: AblationVariants;
+      try {
+        variants = ablateRule(source.content, span);
+      } catch {
+        // A stale or ambiguous span spends nothing; the real run reports it as a failed finding.
+        cases.push({ arms: [], id: evalCase.id, na: true });
+        continue;
+      }
+      const fixture = resolveFixture(
+        selectFixture(evalCase.fixture, target.evals.fixture),
+        target.directory,
+      );
+      const configured = clampedTrialCount(evalCase.trials);
+      const maxPerArm = configured === 1 ? 1 : 5;
+      const armPlans: ArmPlan[] = [];
+      for (const arm of INSTRUCTION_ARMS) {
+        const identity = {
+          arm,
+          evalCase,
+          executor: metadata,
+          fixtureHash: fixture?.hash,
+          instructionHash: sha256(armInstructionContent(arm, variants)),
+          loadoutHash: loadoutHash([]),
+        };
+        const key = cache.keyFor(identity);
+        const cached =
+          options.useCache && (scheduledKeys.has(key) || cache.lookup(identity) !== undefined);
+        if (options.useCache) scheduledKeys.add(key);
+        if (cached) {
+          armsCached += 1;
+          armPlans.push({ arm, cached: true, reused: false, trialsMax: 0, trialsMin: 0 });
+          continue;
+        }
+        armsToRun += 1;
+        trialsMin += configured;
+        trialsMax += maxPerArm;
+        armPlans.push({
+          arm,
+          cached: false,
+          reused: false,
+          trialsMax: maxPerArm,
+          trialsMin: configured,
+        });
+      }
+      cases.push({ arms: armPlans, id: evalCase.id, na: false });
+    }
+    instructions.push({ cases, id: target.id });
+  }
+
+  return { armsCached, armsToRun, instructions, trialsMax, trialsMin };
 }
 
 // The pure core of a dry run: given already-resolved skills, loadout, executor identity, and cache,
@@ -342,7 +698,16 @@ export function computePlan(
     skills.push({ cases, name: skill.name });
   }
 
-  return { armsCached, armsReused, armsToRun, executor: metadata, skills, trialsMax, trialsMin };
+  return {
+    armsCached,
+    armsReused,
+    armsToRun,
+    executor: metadata,
+    instructions: [],
+    skills,
+    trialsMax,
+    trialsMin,
+  };
 }
 
 // Resolves the requested loadout to its members and their content hashes, once for the whole run.
@@ -374,8 +739,29 @@ export function assertShellAllowed(
   skills: readonly ReadyDiscoveredSkill[],
   caseFilter: string | undefined,
   allow: boolean,
+  instructions: readonly ReadyDiscoveredInstruction[] = [],
 ): void {
   if (allow) return;
+  // An instruction target's skillval.yml carries the same executable fields as any other case file,
+  // so it is gated identically - the instruction file itself is inert, its case file is not.
+  for (const instruction of instructions) {
+    for (const evalCase of instruction.evals.cases) {
+      if (caseFilter !== undefined && evalCase.id !== caseFilter) continue;
+      const fixture = selectFixture(evalCase.fixture, instruction.evals.fixture);
+      if (fixture?.setup !== undefined && fixture.setup.length > 0) {
+        throw new Error(
+          `case "${evalCase.id}" (instruction target "${instruction.id}") runs case-authored ` +
+            "fixture setup shell. Re-run with --allow-shell to permit it.",
+        );
+      }
+      if (evalCase.assert?.command_exit !== undefined) {
+        throw new Error(
+          `case "${evalCase.id}" (instruction target "${instruction.id}") runs the case-authored ` +
+            "command_exit grader. Re-run with --allow-shell to permit it.",
+        );
+      }
+    }
+  }
   for (const skill of skills) {
     for (const evalCase of skill.evals.cases) {
       if (caseFilter !== undefined && evalCase.id !== caseFilter) continue;
@@ -407,8 +793,21 @@ export function assertPiGenerationAcknowledged(
   skills: readonly ReadyDiscoveredSkill[],
   caseFilter: string | undefined,
   allow: boolean,
+  instructions: readonly ReadyDiscoveredInstruction[] = [],
 ): void {
   if (executorName !== "pi" || allow) return;
+  for (const instruction of instructions) {
+    for (const evalCase of instruction.evals.cases) {
+      if (caseFilter !== undefined && evalCase.id !== caseFilter) continue;
+      if (evalCase.mode === "generation") {
+        throw new Error(
+          `pi has no OS sandbox, so generation case "${evalCase.id}" (instruction target ` +
+            `"${instruction.id}") would run agent writes without enforced isolation. Re-run with ` +
+            "--allow-unsandboxed-pi to acknowledge, or use codex or claude for generation cases.",
+        );
+      }
+    }
+  }
   for (const skill of skills) {
     for (const evalCase of skill.evals.cases) {
       if (caseFilter !== undefined && evalCase.id !== caseFilter) continue;
@@ -569,6 +968,195 @@ export function armCacheIdentity(
     ),
     triggerTarget: targetPresent ? targetName : undefined,
   };
+}
+
+function runInstructionCase(
+  context: InstructionCaseContext,
+  evalCase: EvalCase,
+  log: (message: string) => void,
+): InstructionFinding {
+  const span = evalCase.rule_text ?? "";
+  const home = resolveRuleFile(context.executor.metadata.name, context.files, span);
+  if (home === undefined) {
+    const finding = createNaInstructionFinding(evalCase, context.executor.metadata.name);
+    log(`  ${evalCase.id} n/a (${finding.naReason})`);
+    return finding;
+  }
+
+  const source = context.files.find((entry) => entry.file === home);
+  if (source === undefined) {
+    throw new Error(`instruction target "${context.target.id}" is missing resolved file ${home}`);
+  }
+
+  let variants: ReturnType<typeof ablateRule>;
+  try {
+    variants = ablateRule(source.content, span);
+  } catch (error) {
+    if (!(error instanceof AblationError)) throw error;
+    log(`  ${evalCase.id} [${home}] FAIL (${error.message})`);
+    const finding = failedInstructionFinding(evalCase, home, error);
+    log(`  ${evalCase.id} [${home}] ${INSTRUCTION_VERDICT_TEXT.inconclusive} -> ${finding.action}`);
+    return finding;
+  }
+
+  const fixture = resolveFixture(
+    selectFixture(evalCase.fixture, context.target.evals.fixture),
+    context.target.directory,
+  );
+  const arms = INSTRUCTION_ARMS.map((arm) => {
+    log(`  ${evalCase.id} [${arm}] ...`);
+    const result = runInstructionArm(
+      {
+        cache: context.cache,
+        content: armInstructionContent(arm, variants),
+        evalCase,
+        executor: context.executor,
+        filename: home,
+        fixture,
+        targetId: context.target.id,
+        useCache: context.useCache,
+      },
+      arm,
+    );
+    log(
+      `  ${evalCase.id} [${arm}] ${result.pass ? "pass" : "FAIL"}${
+        result.cached ? " (cached)" : ""
+      }`,
+    );
+    return result;
+  });
+  const passOf = (arm: RuntimeArm): boolean =>
+    arms.find((result) => result.arm === arm)?.pass === true;
+  const peersMeaningful = hasPeerGradedAssertion(evalCase);
+  const verdict = groupVerdict(passOf("solo"), passOf("group"), passOf("peers"), peersMeaningful);
+  const finding: InstructionFinding = {
+    action: instructionAction(verdict),
+    arms,
+    caseId: evalCase.id,
+    file: home,
+    rule: evalCase.rule,
+    span,
+    verdict,
+  };
+  log(`  ${evalCase.id} [${home}] ${INSTRUCTION_VERDICT_TEXT[verdict]} -> ${finding.action}`);
+  return finding;
+}
+
+function failedInstructionFinding(
+  evalCase: EvalCase,
+  file: string,
+  error: AblationError,
+): InstructionFinding {
+  return {
+    action: instructionAction("inconclusive"),
+    arms: [
+      {
+        arm: "group",
+        cached: false,
+        pass: false,
+        trials: [
+          {
+            checks: [{ detail: error.message, name: "ablation", pass: false }],
+            pass: false,
+            usage: undefined,
+          },
+        ],
+      },
+    ],
+    caseId: evalCase.id,
+    file,
+    rule: evalCase.rule,
+    span: evalCase.rule_text ?? "",
+    verdict: "inconclusive",
+  };
+}
+
+function instructionGroupPassed(finding: InstructionFinding): boolean {
+  return finding.arms.find((arm) => arm.arm === "group")?.pass === true;
+}
+
+function instructionFindingIsNoop(finding: InstructionFinding, evalCase: EvalCase): boolean {
+  return (
+    hasPeerGradedAssertion(evalCase) &&
+    finding.arms.find((arm) => arm.arm === "peers")?.pass === true
+  );
+}
+
+function runInstructionArm(context: InstructionArmContext, arm: RuntimeArm): ArmResult {
+  const identity = {
+    arm,
+    evalCase: context.evalCase,
+    executor: context.executor.metadata,
+    fixtureHash: context.fixture?.hash,
+    instructionHash: sha256(context.content),
+    loadoutHash: loadoutHash([]),
+  };
+  if (context.useCache) {
+    const hit = context.cache.lookup(identity);
+    if (hit !== undefined) return hit;
+  }
+
+  const trials: TrialResult[] = [];
+  const wanted = clampedTrialCount(context.evalCase.trials);
+  for (let index = 0; index < wanted; index += 1) {
+    trials.push(runInstructionTrial(context, arm));
+  }
+  while (shouldEscalate(trials)) trials.push(runInstructionTrial(context, arm));
+
+  const result: ArmResult = {
+    arm,
+    cached: false,
+    pass: hasMajority(trials),
+    trials,
+  };
+  context.cache.store(identity, result);
+  return result;
+}
+
+function runInstructionTrial(context: InstructionArmContext, arm: RuntimeArm): TrialResult {
+  const workspace = mkdtempSync(join(tmpdir(), `skillval-${context.evalCase.id}-`));
+  const trialHome = mkdtempSync(join(tmpdir(), "skillval-home-"));
+
+  try {
+    const fixtureSetup =
+      context.fixture === undefined
+        ? undefined
+        : applyFixture(context.fixture, workspace, trialHome);
+    const trace = context.executor.runTrial({
+      arm,
+      evalCase: context.evalCase,
+      home: trialHome,
+      seededInstruction: { content: context.content, filename: context.filename },
+      seededSkills: [],
+      skillName: context.targetId,
+      workspace,
+    });
+    const checks = gradeTrial(context.evalCase, arm, trace, workspace);
+    return {
+      checks,
+      fixtureSetup,
+      pass: checks.every((check) => check.pass),
+      usage: trace.usage,
+    };
+  } catch (error) {
+    if (error instanceof FixtureSetupError) {
+      return {
+        checks: [{ detail: error.message, name: "fixture-setup", pass: false }],
+        fixtureSetup: error.results,
+        pass: false,
+        usage: undefined,
+      };
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      checks: [{ detail, name: "run", pass: false }],
+      pass: false,
+      usage: undefined,
+    };
+  } finally {
+    rmSync(workspace, { force: true, recursive: true });
+    rmSync(trialHome, { force: true, recursive: true });
+  }
 }
 
 function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {

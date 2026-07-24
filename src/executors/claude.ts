@@ -17,6 +17,7 @@ import {
   type Executor,
   type ExecutorMetadata,
   type ExecutorOverrides,
+  type SeededInstruction,
   type SeededSkill,
   type TrialRequest,
 } from "./types.js";
@@ -47,6 +48,7 @@ export class ClaudeExecutor implements Executor {
 
   public runTrial(request: TrialRequest): Trace {
     seedSkills(request.workspace, request.seededSkills);
+    seedInstruction(request.workspace, request.seededInstruction);
     // Pass the effective model and effort explicitly so a --model/--effort override wins over the
     // rebuilt settings.json and the trial always runs what metadata reports and caches. metadata
     // folds in any override; "default" means none was configured, so nothing is passed and Claude's
@@ -108,6 +110,14 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): v
   for (const skill of skills) {
     symlinkSync(skill.directory, join(skillsRoot, skill.name));
   }
+}
+
+// Writes the instruction arm's ambient file. The runner supplies the filename from per-executor
+// resolution (claude reads a project CLAUDE.md ambiently, and not a bare AGENTS.md - verified), so
+// no filename translation happens here.
+export function seedInstruction(workspace: string, instruction?: SeededInstruction): void {
+  if (instruction === undefined) return;
+  writeFileSync(join(workspace, instruction.filename), instruction.content);
 }
 
 // Settings keys that select the model and route authentication - safe to carry into a clean run.

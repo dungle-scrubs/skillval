@@ -11,6 +11,16 @@ export const VERDICT_TEXT: Record<Verdict, string> = {
   redundant: "redundant - another skill already does it",
 };
 
+// The same verdicts phrased for an instruction rule, whose peers are the other rules in its own
+// file rather than other skills. Same classification, accurate subject.
+export const INSTRUCTION_VERDICT_TEXT: Record<Verdict, string> = {
+  inconclusive: "inconclusive - see the arm results",
+  interference: "conflicts with the other rules in this file",
+  "load-bearing": "works and is needed here",
+  prune: "not needed at all",
+  redundant: "redundant - another rule in this file already does it",
+};
+
 // The four verdicts that drive action, from the pass/fail of the three arms:
 //   solo   = the skill alone,  group = the skill within the loadout,  peers = the loadout minus it.
 // Interference keys on the skill working alone but not within the loadout - but only when the

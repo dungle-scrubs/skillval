@@ -57,6 +57,22 @@ describe("configuration paths", () => {
     }
   });
 
+  it("expands tilde and HOME references in projects", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-test-"));
+    const path = resolve(directory, "config.yml");
+    writeFileSync(path, "executor: codex\nprojects: [~/dev/first, $HOME/dev/second]\nroots: []\n");
+
+    try {
+      expect(loadConfig(path, "/Users/example")).toEqual({
+        executor: "codex",
+        projects: ["/Users/example/dev/first", "/Users/example/dev/second"],
+        roots: [],
+      });
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
   it("rejects unknown configuration fields", () => {
     const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-test-"));
     const path = resolve(directory, "config.yml");

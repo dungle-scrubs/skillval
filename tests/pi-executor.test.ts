@@ -1,5 +1,57 @@
-import { describe, expect, it } from "vitest";
-import { PI_INVOCATION_DETECTION, parsePiTrace } from "../src/executors/pi.js";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { PI_INVOCATION_DETECTION, parsePiTrace, prepareCleanPiHome } from "../src/executors/pi.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+const makeDir = (): string => {
+  const directory = mkdtempSync(join(tmpdir(), "skillval-pi-test-"));
+  temporaryDirectories.push(directory);
+  return directory;
+};
+
+describe("prepareCleanPiHome", () => {
+  it("mirrors auth and model files but never the global instruction files", () => {
+    const realAgentDirectory = makeDir();
+    const home = makeDir();
+    for (const file of ["auth.json", "settings.json", "models.json", "auth-profiles.json"]) {
+      writeFileSync(join(realAgentDirectory, file), "{}");
+    }
+    // A user-global AGENTS.md/CLAUDE.md would otherwise enter every arm and could make the peers
+    // arm pass, misreporting the target rule as redundant.
+    writeFileSync(join(realAgentDirectory, "AGENTS.md"), "- global rule\n");
+    writeFileSync(join(realAgentDirectory, "CLAUDE.md"), "- global rule\n");
+    mkdirSync(join(realAgentDirectory, "extensions"));
+
+    const clean = prepareCleanPiHome(home, realAgentDirectory);
+
+    expect(existsSync(join(clean, "auth.json"))).toBe(true);
+    expect(existsSync(join(clean, "settings.json"))).toBe(true);
+    expect(existsSync(join(clean, "models.json"))).toBe(true);
+    expect(existsSync(join(clean, "auth-profiles.json"))).toBe(true);
+    expect(existsSync(join(clean, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(clean, "CLAUDE.md"))).toBe(false);
+    expect(existsSync(join(clean, "extensions"))).toBe(false);
+  });
+
+  it("is idempotent across the arms of one trial home", () => {
+    const realAgentDirectory = makeDir();
+    const home = makeDir();
+    writeFileSync(join(realAgentDirectory, "auth.json"), "{}");
+
+    expect(prepareCleanPiHome(home, realAgentDirectory)).toBe(
+      prepareCleanPiHome(home, realAgentDirectory),
+    );
+  });
+});
 
 const line = (value: unknown): string => JSON.stringify(value);
 

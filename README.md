@@ -1,10 +1,11 @@
 # skillval
 
-`skillval` evaluates [Agent Skills](https://agentskills.io/) with deterministic graders and no
-model judges. Each case can run a `solo` arm (the skill alone) and a `baseline` arm (no skill),
-measuring whether a skill changes agent behavior instead of merely checking whether the final
-answer looks acceptable. When the baseline also passes, the rule is flagged as a no-op and a
-possible prune candidate. You can only trust what you test.
+`skillval` evaluates [Agent Skills](https://agentskills.io/) and agent instruction files
+(`CLAUDE.md`, `AGENTS.md`) with deterministic graders and no model judges. Each case can run a
+`solo` arm (the skill alone) and a `baseline` arm (no skill), measuring whether a skill changes
+agent behavior instead of merely checking whether the final answer looks acceptable. When the
+baseline also passes, the rule is flagged as a no-op and a possible prune candidate. You can only
+trust what you test.
 
 Both arms run in a clean environment - your globally installed skills are hidden - so the only
 variable is whether the skill under test is present. `solo` seeds just that skill; `baseline` seeds
@@ -102,6 +103,88 @@ Each arm is `cached` (a hit, no trials), `reused from solo` (a group arm with no
 `run` with its trial count - the minimum it will spend, and the ceiling if trials disagree and
 escalate to five. `--dry-run` writes no report and applies no execution gates, so it previews cost
 even for a suite a real run would refuse. `--json` returns the full plan.
+## Instruction files
+
+An agent instruction file (`CLAUDE.md`, `AGENTS.md`) is a bag of rules nobody re-tests. skillval
+audits it the same way it audits a skill, one rule at a time, using **single-rule ablation**: hold
+the whole file fixed and remove exactly one rule. That is group mode pointed inward, where the rest
+of the file is the rule's loadout:
+
+| Arm | Content |
+| --- | --- |
+| `solo` | the rule alone |
+| `group` | the whole file (the rule plus its sibling rules) |
+| `peers` | the whole file minus that one rule |
+
+The verdict table is the same as [group mode](#group-mode), read per rule: `group` pass with `peers`
+fail means the rule is load-bearing; `group` pass with `peers` **pass** means another rule in the
+same file already covers it, so the rule is **redundant** and a deletion candidate. That intra-file
+redundancy is the finding whole-file testing cannot produce.
+
+Each instruction file carries a sibling `skillval.yml` with `target: instructions`, and each case
+names the rule it ablates with `rule_text` - the verbatim span, matched exactly (authored
+indentation is part of the address). A span that is missing or appears more than once is a
+validation error rather than a silent mis-ablation.
+
+```yaml
+# AGENTS.md sits beside this file
+target: instructions
+class: preference
+cases:
+  - id: greeting-token
+    mode: generation
+    rule: greeting-token
+    rule_text: "- When asked to create a greeting file, its first line must be exactly HELLO."
+    prompt: Create greeting.txt containing a short greeting.
+    assert:
+      must_match: ["HELLO"]
+```
+
+`should_trigger` is a validation error on instruction targets: instruction files are ambient, so
+nothing is ever "invoked".
+
+### Which executor sees which file
+
+Instruction files are read natively, and the executors differ. Measured behavior:
+
+| Executor | Reads ambiently |
+| --- | --- |
+| `codex` | `AGENTS.md` |
+| `claude` | `CLAUDE.md` (a bare `AGENTS.md` is **not** read; verified) |
+| `pi` | `AGENTS.md`, then `CLAUDE.md` |
+
+A rule only reaches an executor that reads the file it lives in. A rule in a `CLAUDE.md` is
+therefore **not applicable** to codex, and is reported `n/a` - never a pass and never a fail, so an
+audit never claims a result for instructions that executor would not see in the real project.
+
+Known v1 limitation: a rule that reaches claude only through a `CLAUDE.md` `@import` of `AGENTS.md`
+is `n/a` for claude, because v1 ablates the file the executor reads natively. Cross-file import
+ablation is planned.
+
+### Reading the report
+
+The report is a remediation manifest, not a pass/fail dump. Each finding carries the file, the
+verbatim span, the verdict, and an `action` an agent can execute directly:
+
+| Verdict | Action | Meaning |
+| --- | --- | --- |
+| load-bearing | `keep` | the rule is doing work |
+| redundant | `delete` | another rule already covers it |
+| prune | `delete` | not needed at all |
+| interference | `review` | the rule fights the others |
+| inconclusive | `investigate` | see the raw arm results |
+
+Every finding keeps its raw arm results, so the reasoning stays inspectable.
+
+### The HTML report
+
+After each run skillval writes a self-contained HTML report beside the JSON one and opens it. It
+leads with **what to change**: every rule flagged `delete` or `review`, with the exact span to act
+on, why it was flagged (tied to the arm that proved it), and the arm evidence beside the
+recommendation. The page has no external assets or scripts and follows the system light/dark theme.
+
+Turn it off with `htmlReport: false` in the configuration - useful in CI or scripted runs. Failing
+to open a browser is never a run failure; the path is always printed.
 
 ## Install
 
@@ -179,11 +262,34 @@ roots:
   - ~/dev/skills/skills/standards
   - $HOME/dev/shared/skills/backend
 executor: codex
+htmlReport: true
 ```
+
+`htmlReport` (optional, enabled when omitted) writes a self-contained
+[HTML report](#the-html-report) beside the JSON one after each run and opens it. Set it to `false`
+for headless or CI runs.
 
 `roots` contains directories whose immediate children have the form `<skill>/SKILL.md`. Both `~`
 and `$HOME` are expanded. `executor` selects the trial adapter: `codex`, `claude`, or `pi`. Missing roots are skipped during `run`; `list` returns them in
 `missingRoots` with JSON output and prints each as `missing root: <path>` in human output.
+
+`projects` (optional) contains **project trees** scanned recursively for
+[instruction files](#instruction-files) and project-scoped skills, each gated by a sibling
+`skillval.yml`:
+
+```yaml
+projects:
+  - ~/dev/myapp
+```
+
+A scan finds `CLAUDE.md`/`AGENTS.md` at any depth plus skills under `.claude/skills/*` and
+`.agents/skills/*`, always skipping `.git` and `node_modules`. Targets are identified by tree
+position (`myapp:.`, `myapp:packages/api`).
+
+A `projects` entry is **one project, pointed at deliberately**. A directory holding several
+independent git repos (each with its own `.git`, often gitignored by the parent) is not supported:
+evaluate each real repo from its own root. Deep recursion inside one repo - internal packages with
+their own `AGENTS.md` - is the intended use.
 
 `loadouts` (optional) defines named skill sets for [group mode](#group-mode): a map from a loadout
 name to the discovered skill names it contains. Select one with `--loadout <name>`.
@@ -199,9 +305,11 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 `~/.local/state/skillval` when `XDG_STATE_HOME` is unset:
 
 - `cache/` stores arm results.
-- `reports/` stores run reports named by a hash of the participating skills and their content
-  hashes. Each report also includes every participating skill's content hash and the executor's
-  name, version, model, thinking-level identity, and invocation-detection method.
+- `reports/` stores run reports named by a hash of the participating targets, their content hashes,
+  and the executor identity - results are executor-specific, so running the same targets under a
+  second executor writes a separate report instead of overwriting the first. Each report also
+  includes every participating skill's content hash and the executor's name, version, model,
+  thinking-level identity, and invocation-detection method.
 
 `skillval list` returns the skill name, configured root, class, case count, whether `skillval.yml`
 exists, and a `missing`, `invalid`, or `ready` status in JSON output. Invalid case files include a
@@ -233,6 +341,10 @@ The agent trials themselves are a separate boundary, sandboxed per executor (see
 pi generation trials have no sandbox at all and must be acknowledged with
 `--allow-unsandboxed-pi`.
 
+An instruction file is inert Markdown - evaluating one executes nothing from the file itself - but
+its sibling `skillval.yml` carries the same executable fields as any other case file, so it is
+trusted at exactly the same level.
+
 ## Case files
 
 Only a file named `skillval.yml` next to `SKILL.md` is recognized. There is no `evals.yml`
@@ -244,7 +356,10 @@ check freshness with `pnpm schema:check`.
 
 Top-level fields:
 
-- `skill`: the directory and skill name.
+- `target`: `skill` (the default when omitted) or `instructions`. An `instructions` file sits beside
+  a `CLAUDE.md`/`AGENTS.md` and declares no `skill`; see [Instruction files](#instruction-files).
+- `skill`: the directory and skill name. Required for skill targets, and rejected on instruction
+  targets, whose identity comes from their position in the project tree.
 - `class`: `preference` or `capability`.
 - `cases`: an array of deterministic evaluation cases.
 - `fixture`: optional suite-wide workspace fixture applied to every case that does not declare
@@ -257,6 +372,10 @@ Case fields:
   temporary workspace.
 - `type`: optional `preference` or `capability` classification.
 - `rule`: optional stable rule identifier included in reports.
+- `rule_text`: the verbatim rule span this case ablates, required on instruction targets. It is
+  content-addressed and matched exactly - authored indentation is part of the address - and must
+  appear exactly once in the file, so a stale or ambiguous span is a clean error instead of a silent
+  mis-ablation. The `peers` arm is the file with exactly this span removed.
 - `should_trigger`: optional expected invocation verdict. It is checked only on arms where the skill under test is present (`solo`).
 - `arms`: `solo`, or `solo` and `baseline`. The default is `[solo]`.
 - `prompt`: the complete trial prompt.
@@ -426,8 +545,16 @@ overrides the default for the run, and the override is what gets captured. Chang
 in the provider configuration or via the flags - therefore keys distinct cached results.
 
 Cached arm results are keyed by runner version, skill content hash, serialized case, arm, executor
-name, executor version, configured model, and configured thinking level. A trial has a 15-minute
-timeout and a 64 MB output buffer.
+name, executor version, configured model, and configured thinking level. Instruction arms add a
+content hash of the resolved instruction file the arm seeds, because two instruction cases can share
+identical case JSON while their surrounding rules differ - the seeded content, not just the case,
+must key the arm. A trial has a 15-minute timeout and a 64 MB output buffer.
+
+For instruction targets, each adapter writes the arm's resolved file under the name it reads
+natively, with no filename translation, and pi additionally redirects `PI_CODING_AGENT_DIR` and
+`HOME` at a clean per-trial directory carrying only auth and model selection - otherwise a
+user-global `AGENTS.md`/`CLAUDE.md` would enter every arm and could make the `peers` arm pass,
+misreporting the target rule as redundant.
 
 ## Roadmap
 
@@ -442,10 +569,12 @@ timeout and a 64 MB output buffer.
 - Add cheap trigger simulations for broad description coverage before expensive executor trials.
 - Add a `lint` subcommand for Agent Skills format, references, case coverage, and regular
   expressions.
-- Evaluate agent instruction files (`CLAUDE.md`, `AGENTS.md`) with the same arm comparison, so
-  instruction rules can be proven load-bearing or flagged as no-ops the way skill rules are. The
-  shape is undecided: likely instructions-present vs instructions-absent arms over cases derived
-  from the file's rules.
+- Ablate a rule across files, not only within one: prove whether an ancestor or imported rule makes
+  a nested rule redundant. This also covers the rule that reaches claude only via a `CLAUDE.md`
+  `@import` of `AGENTS.md`, which single-file ablation reports as `n/a` today.
+- Ship an assisted-authoring skill that drafts `skillval.yml` cases from an existing skill or
+  instruction file, proposing one case per rule with its `rule_text` span for a human to ratify.
+  Case authoring is the real adoption barrier, especially for a long `CLAUDE.md`.
 - Harvest missed triggers, false invocations, and behavioral regressions from real session
   transcripts as new cases.
 - Support multi-model interpretation and no-op pruning in report summaries, not only raw reports.

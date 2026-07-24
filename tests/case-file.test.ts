@@ -50,6 +50,81 @@ describe("case-file parsing", () => {
     );
   });
 
+  it("parses an instruction target without a skill and accepts rule_text", () => {
+    const source = `
+target: instructions
+class: preference
+cases:
+  - id: concise-output
+    mode: generation
+    prompt: Answer briefly.
+    rule_text: Keep answers concise.
+`;
+
+    const parsed = parseCaseFile(source);
+
+    expect(parsed.skill).toBeUndefined();
+    expect(parsed.target).toBe("instructions");
+    expect(parsed.cases[0]?.rule_text).toBe("Keep answers concise.");
+  });
+
+  it("requires skill for the default skill target and names the file", () => {
+    const source = `
+class: capability
+cases: []
+`;
+
+    expect(() => parseCaseFile(source, "/tmp/missing-skill.yml")).toThrow(
+      '/tmp/missing-skill.yml is missing required "skill"',
+    );
+  });
+
+  it("rejects skill on an instruction target", () => {
+    const source = `
+target: instructions
+skill: forbidden
+class: capability
+cases: []
+`;
+
+    expect(() => parseCaseFile(source, "/tmp/instructions.yml")).toThrow(
+      '/tmp/instructions.yml target "instructions" must not declare "skill"',
+    );
+  });
+
+  it("requires a non-empty rule_text for every instruction case", () => {
+    const source = `
+target: instructions
+class: preference
+cases:
+  - id: missing-span
+    mode: generation
+    prompt: Answer briefly.
+    rule_text: " "
+`;
+
+    expect(() => parseCaseFile(source, "/tmp/instructions.yml")).toThrow(
+      '/tmp/instructions.yml case "missing-span" is missing required non-empty "rule_text"',
+    );
+  });
+
+  it("rejects should_trigger on an instruction case", () => {
+    const source = `
+target: instructions
+class: preference
+cases:
+  - id: ambient-rule
+    mode: generation
+    prompt: Answer briefly.
+    rule_text: Keep answers concise.
+    should_trigger: true
+`;
+
+    expect(() => parseCaseFile(source, "/tmp/instructions.yml")).toThrow(
+      '/tmp/instructions.yml case "ambient-rule" target "instructions" must not declare "should_trigger"',
+    );
+  });
+
   it("reports duplicate case identifiers", () => {
     const source = `
 skill: duplicate

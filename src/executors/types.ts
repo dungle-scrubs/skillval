@@ -43,10 +43,21 @@ export interface SeededSkill {
   readonly name: string;
 }
 
+// The instruction file to make ambient for an instruction-target arm: the resolved single-rule
+// ablation variant, plus the filename the executor reads natively (AGENTS.md for codex/pi, CLAUDE.md
+// for claude). The runner picks the filename from per-executor resolution, so the adapter only writes.
+export interface SeededInstruction {
+  readonly content: string;
+  readonly filename: string;
+}
+
 export interface TrialRequest {
   readonly arm: RuntimeArm;
   readonly evalCase: EvalCase;
   readonly home: string;
+  // The instruction file this arm makes ambient, for instruction targets. Undefined for skill
+  // targets, which seed skills instead.
+  readonly seededInstruction?: SeededInstruction;
   // Every skill made discoverable for this arm. The skill arm seeds the target; the baseline arm
   // seeds none. Loadout mode seeds a set. Adapters install exactly this list and nothing else.
   readonly seededSkills: readonly SeededSkill[];
