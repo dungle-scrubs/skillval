@@ -343,8 +343,9 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 
 - `cache/` stores arm results.
 - `reports/` stores run reports named by a hash of the participating targets, their content hashes,
-  and the executor identity - results are executor-specific, so running the same targets under a
-  second executor writes a separate report instead of overwriting the first. Each report also
+  the executor identity, and the `--case` filter - results are executor-specific and
+  slice-specific, so running the same targets under a second executor, or a single case out of a
+  suite, writes a separate report instead of overwriting the first. Each report also
   includes every participating skill's content hash and the executor's name, version, model,
   thinking-level identity, and invocation-detection method.
 

@@ -281,9 +281,11 @@ export function runEvaluation(
   // Results are executor-specific (a rule visible to codex can be n/a for claude), so the executor
   // identity belongs in the report path. Without it, running the same targets under a second
   // executor silently overwrites the first report.
+  // The case filter is part of the report's identity: a --case run measures a different slice
+  // than the full suite and must not overwrite its report (or another case's).
   const runHash = sha256(
     `${targetsHash}\0EXECUTOR\0${executor.metadata.name}\0${executor.metadata.version}\0` +
-      `${executor.metadata.model}\0${executor.metadata.thinking}`,
+      `${executor.metadata.model}\0${executor.metadata.thinking}\0CASE\0${options.caseFilter ?? ""}`,
   );
   const instructionReports: Record<string, InstructionTargetReport> = {};
   const skillReports: Record<string, SkillReport> = {};

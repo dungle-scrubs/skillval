@@ -73,6 +73,10 @@ describe("ast grader", () => {
     );
     expect(bad[0]?.pass).toBe(false);
     expect(bad[0]?.detail).toContain("must_match[0] matched nothing");
+    // The report carries what was actually parsed, so the miss is diagnosable after the
+    // workspace is gone.
+    expect(bad[0]?.detail).toContain("| got: ");
+    expect(bad[0]?.detail).toContain("class Semaphore");
   });
 
   it("fails a forbidden structure with the offending file, line, and snippet", () => {
