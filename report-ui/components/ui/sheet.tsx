@@ -19,13 +19,13 @@ function SheetContent({
   return (
     <SheetPrimitive.Portal>
       <SheetPrimitive.Overlay
-        className="fixed inset-0 z-50 bg-overlay data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
+        className="fixed inset-0 z-50 bg-overlay data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-400 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-250"
         data-slot="sheet-overlay"
       />
       <SheetPrimitive.Content
         className={cn(
-          "fixed inset-y-0 right-0 z-50 flex h-full w-[min(38rem,94vw)] flex-col gap-4 overflow-y-auto border-border border-l bg-background p-6 shadow-xl",
-          "data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right",
+          "fixed inset-y-0 right-0 z-50 flex h-full w-[min(50rem,94vw)] flex-col gap-4 overflow-y-auto border-border border-l bg-background p-6 shadow-xl",
+          "transition ease-in-out data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=open]:duration-400 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-250",
           className,
         )}
         data-slot="sheet-content"
