@@ -402,15 +402,17 @@ function gradeAst(workspace: string, config: AstGraderConfig): GraderCheck {
     if (parseError !== null) {
       const line = parseError.range().start.line + 1;
       return {
-        detail: `${config.file} does not parse (syntax error at line ${line}); structural rules were not evaluated`,
+        detail: `${config.file} does not parse (syntax error at line ${line}); structural rules were not evaluated | got: ${source.slice(0, 400)}`,
         name: "ast",
         pass: false,
       };
     }
     for (const [index, rule] of (config.must_match ?? []).entries()) {
       if (find(rule, `must_match[${index}]`) === null) {
+        // Carry a got: excerpt of what was actually parsed, mirroring the regex checks - without
+        // it, an unmatched rule against a deleted workspace is undiagnosable from the report.
         return {
-          detail: `ast must_match[${index}] matched nothing: ${JSON.stringify(rule).slice(0, 200)}`,
+          detail: `ast must_match[${index}] matched nothing: ${JSON.stringify(rule).slice(0, 200)} | got: ${source.slice(0, 400)}`,
           name: "ast",
           pass: false,
         };
