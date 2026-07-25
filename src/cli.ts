@@ -2,8 +2,12 @@
 
 /** Defines the command-line transport and renders runner and discovery results. */
 import { spawn } from "node:child_process";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Command } from "commander";
-import { loadConfig, resolveConfigPath } from "./config.js";
+import { loadConfig, resolveConfigPath, resolveStateDirectory } from "./config.js";
+import { computeCoverage } from "./coverage.js";
+import { renderCoverageReport } from "./coverage-report.js";
 import type { DiscoveredInstruction, DiscoveredSkill } from "./discovery.js";
 import {
   discoverProjects,
@@ -186,6 +190,52 @@ program
     }
     for (const root of [...discovery.missingRoots, ...projectDiscovery.missingRoots]) {
       console.log(`missing root: ${root}`);
+    }
+  });
+
+program
+  .command("coverage")
+  .description(
+    "Render an eval-coverage matrix of every ready skill: cases per skill by grader rung (trigger-only, regex, execution)",
+  )
+  .option("--json", "return the coverage report as JSON instead of writing the HTML page")
+  .action((options: ListOptions, command: Command): void => {
+    const globalOptions = command.optsWithGlobals() as GlobalOptions & ListOptions;
+    const configPath = resolveConfigPath({ cliPath: globalOptions.config });
+    const config = loadConfig(configPath);
+    const discovery = discoverSkills(config.roots, config.exclude ?? []);
+    const projectDiscovery = discoverProjects(config.projects ?? [], config.exclude ?? []);
+    // The full discovery result goes in, not just the ready skills: missing roots and skipped
+    // skills belong in the report, or it silently narrows its universe while looking complete.
+    const report = computeCoverage(
+      [...discovery.skills, ...projectDiscovery.skills],
+      [...discovery.missingRoots, ...projectDiscovery.missingRoots],
+    );
+    if (options.json === true) {
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+    // A stable filename: coverage is a view of the current suites, not a run artifact keyed by
+    // what executed, so each render replaces the last instead of accumulating. Written to a
+    // sibling temp file and renamed so an interruption never leaves the sole report partial.
+    const reportDirectory = join(resolveStateDirectory(), "reports");
+    mkdirSync(reportDirectory, { recursive: true });
+    const htmlPath = join(reportDirectory, "coverage.html");
+    const stagingPath = `${htmlPath}.tmp-${process.pid}`;
+    writeFileSync(
+      stagingPath,
+      renderCoverageReport(report, { generatedAt: new Date().toISOString() }),
+    );
+    renameSync(stagingPath, htmlPath);
+    console.log(`coverage: ${htmlPath}`);
+    openInBrowser(htmlPath);
+    for (const root of report.missingRoots) console.log(`missing root: ${root}`);
+    for (const skill of report.skipped) {
+      console.log(
+        `skipped (${skill.status}): ${skill.name}${
+          skill.validationError === undefined ? "" : ` - ${skill.validationError}`
+        }`,
+      );
     }
   });
 

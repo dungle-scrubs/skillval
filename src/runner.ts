@@ -1,5 +1,5 @@
 /** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AblationVariants } from "./ablate.js";
@@ -379,10 +379,20 @@ export function runEvaluation(
   // becomes a second source of truth. Enabled unless the configuration turns it off.
   let htmlReportPath: string | undefined;
   if (config.htmlReport !== false) {
+    const generatedAt = new Date().toISOString();
     htmlReportPath = join(reportDirectory, `${runHash}.html`);
+    // Two variants of the same report: the hash-named file is an immutable archive and must not
+    // claim to be the latest run (its nav says "This run (archived)" and links to the alias),
+    // while latest.html is the report nav's stable "Latest run" target, refreshed after every
+    // HTML-enabled run. The page's own subtitle carries the executor identity, so "latest" is
+    // never ambiguous across executors.
     writeFileSync(
       htmlReportPath,
-      renderHtmlReport(report, { generatedAt: new Date().toISOString(), reportPath }),
+      renderHtmlReport(report, { generatedAt, reportPath, variant: "archive" }),
+    );
+    writeLatestReportAlias(
+      reportDirectory,
+      renderHtmlReport(report, { generatedAt, reportPath, variant: "latest" }),
     );
   }
   return {
@@ -395,6 +405,17 @@ export function runEvaluation(
     report,
     reportPath,
   };
+}
+
+// Replaces the stable latest.html alias atomically: content goes to a sibling temp file first and
+// is renamed over the alias, so an interruption or a concurrent reader never sees a partial page.
+// Exported for filesystem-level tests.
+export function writeLatestReportAlias(reportDirectory: string, html: string): string {
+  const latestPath = join(reportDirectory, "latest.html");
+  const stagingPath = `${latestPath}.tmp-${process.pid}`;
+  writeFileSync(stagingPath, html);
+  renameSync(stagingPath, latestPath);
+  return latestPath;
 }
 
 export function instructionAction(verdict: Verdict | "n/a"): InstructionAction {

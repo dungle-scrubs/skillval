@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { escapeHtml, renderHtmlReport } from "../src/html-report.js";
+import { PAYLOAD_GLOBAL } from "../src/report-payload.js";
 import type { RunReport } from "../src/runner.js";
 
 const context = { generatedAt: "2026-07-24T00:00:00.000Z", reportPath: "/state/reports/abc.json" };
@@ -12,173 +13,49 @@ const executor = {
   version: "0.145.0",
 };
 
-function reportWith(findings: RunReport["instructions"]): RunReport {
-  return { executor, instructions: findings, runHash: "abc", skills: {} };
+function reportWith(skills: RunReport["skills"]): RunReport {
+  return { executor, runHash: "abc", skills };
 }
 
 describe("renderHtmlReport", () => {
-  it("leads with the actionable rules and states why each one is flagged", () => {
-    const html = renderHtmlReport(
-      reportWith({
-        "myapp:.": {
-          directory: "/repo",
-          findings: [
-            {
-              action: "delete",
-              arms: [
-                { arm: "solo", cached: false, pass: true, trials: [] },
-                { arm: "group", cached: false, pass: true, trials: [] },
-                { arm: "peers", cached: false, pass: true, trials: [] },
-              ],
-              caseId: "duplicate-rule",
-              file: "AGENTS.md",
-              rule: "duplicate-rule",
-              span: "- Always use tabs.",
-              verdict: "redundant",
-            },
-          ],
-          id: "myapp:.",
-        },
-      }),
-      context,
-    );
+  const html = renderHtmlReport(reportWith({}), context);
 
-    expect(html).toContain("What to change");
-    expect(html).toContain("- Always use tabs.");
-    expect(html).toContain("another rule in this file already covers it");
-    expect(html).toContain("Delete");
-    // The evidence stays inspectable next to the recommendation.
-    expect(html).toContain("peers pass");
-  });
-
-  it("says so plainly when nothing needs changing", () => {
-    const html = renderHtmlReport(
-      reportWith({
-        "myapp:.": {
-          directory: "/repo",
-          findings: [
-            {
-              action: "keep",
-              arms: [{ arm: "group", cached: false, pass: true, trials: [] }],
-              caseId: "load-bearing-rule",
-              file: "AGENTS.md",
-              rule: undefined,
-              span: "- Keep it.",
-              verdict: "load-bearing",
-            },
-          ],
-          id: "myapp:.",
-        },
-      }),
-      context,
-    );
-
-    expect(html).toContain("Nothing to change");
-  });
-
-  it("renders an n/a finding with its reason instead of a verdict", () => {
-    const html = renderHtmlReport(
-      reportWith({
-        "myapp:.": {
-          directory: "/repo",
-          findings: [
-            {
-              action: "investigate",
-              arms: [],
-              caseId: "claude-only",
-              file: "",
-              naReason: "rule is not in a file codex reads ambiently",
-              rule: undefined,
-              span: "- Claude only.",
-              verdict: "n/a",
-            },
-          ],
-          id: "myapp:.",
-        },
-      }),
-      context,
-    );
-
-    expect(html).toContain("n/a");
-    expect(html).toContain("rule is not in a file codex reads ambiently");
-    expect(html).toContain("no arms run");
-  });
-
-  it("renders an inconclusive case as inconclusive, its infra arm labeled, never as a no-op", () => {
-    const html = renderHtmlReport(
-      {
-        executor,
-        runHash: "abc",
-        skills: {
-          "my-skill": {
-            cases: [
-              {
-                arms: [
-                  {
-                    arm: "solo",
-                    cached: false,
-                    infrastructure: true,
-                    pass: false,
-                    trials: [],
-                  },
-                  { arm: "baseline", cached: false, pass: true, trials: [] },
-                ],
-                id: "overflow-case",
-                inconclusive: true,
-                noop: false,
-                pass: false,
-                rule: undefined,
-              },
-            ],
-            class: "capability",
-            contentHash: "deadbeef",
-          },
-        },
-      },
-      context,
-    );
-
-    expect(html).toContain("inconclusive");
-    // The ungraded arm is labeled infra, not shown as a graded fail.
-    expect(html).toContain("solo infra");
-    expect(html).not.toContain("solo fail");
-    expect(html).not.toContain("FAIL");
-    expect(html).not.toContain("no-op");
-  });
-
-  it("is a self-contained document with no external asset references", () => {
-    const html = renderHtmlReport(reportWith({}), context);
-
+  it("renders a self-contained shell hydrating the embedded app", () => {
     expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain("<title>skillval report</title>");
+    expect(html).toContain('<div id="root"></div>');
+    expect(html).toContain(`window.${PAYLOAD_GLOBAL} =`);
+    // The app bundle and stylesheet are inlined; nothing references the network.
     expect(html).toContain("<style>");
-    expect(html).not.toMatch(/<script/i);
-    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).not.toMatch(/src="https?:|href="https?:/);
   });
 
-  it("escapes report content so a rule span cannot inject markup", () => {
-    const html = renderHtmlReport(
+  it("embeds the payload kind and carries the variant through, defaulting to latest", () => {
+    expect(html).toContain('"kind":"run"');
+    expect(html).toContain('"variant":"latest"');
+    const archive = renderHtmlReport(reportWith({}), { ...context, variant: "archive" });
+    expect(archive).toContain('"variant":"archive"');
+  });
+
+  it("keeps hostile report content inert inside the data script", () => {
+    const hostile = renderHtmlReport(
       reportWith({
-        "myapp:.": {
-          directory: "/repo",
-          findings: [
-            {
-              action: "delete",
-              arms: [],
-              caseId: "x",
-              file: "AGENTS.md",
-              rule: undefined,
-              span: '<img src=x onerror="alert(1)">',
-              verdict: "redundant",
-            },
-          ],
-          id: "myapp:.",
+        "</script><script>alert(1)</script>": {
+          cases: [],
+          class: "capability",
+          contentHash: "deadbeef",
         },
       }),
       context,
     );
+    // Angle brackets in the payload are unicode-escaped, so the data script cannot be closed
+    // early and no markup from report content reaches the document.
+    expect(hostile).not.toContain("</script><script>alert(1)</script>");
+    expect(hostile).toContain("\\u003c/script\\u003e");
+  });
 
-    expect(html).not.toContain("<img src=x");
-    expect(html).toContain("&lt;img src=x");
+  it("stamps the theme class before first paint and follows the system", () => {
+    expect(html).toContain('classList.toggle("dark", media.matches)');
   });
 });
 
