@@ -268,13 +268,14 @@ h1 { font-size: 1.7rem; margin: .3rem 0 .35rem; letter-spacing: -.02em; text-wra
   content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%;
   transform: translateX(-50%); z-index: 6; width: max-content;
   max-width: min(17rem, calc(100vw - 2.5rem));
-  background: var(--ink); color: var(--bg); font-size: .78rem; line-height: 1.4;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+  font-size: .78rem; line-height: 1.4;
   padding: .45rem .6rem; border-radius: .4rem; white-space: normal; pointer-events: none;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .25); }
+  box-shadow: 0 3px 14px rgba(0, 0, 0, .3); }
 .seg:hover::before, .seg:focus-visible::before {
   content: ""; position: absolute; bottom: calc(100% + 3px); left: 50%;
   transform: translateX(-50%); z-index: 6; border: 5px solid transparent;
-  border-top-color: var(--ink); border-bottom: 0; pointer-events: none; }
+  border-top-color: var(--line); border-bottom: 0; pointer-events: none; }
 .seg:first-child::after { left: 0; transform: none; }
 .seg:last-child::after, .seg:only-child::after { left: auto; right: 0; transform: none; }
 .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
