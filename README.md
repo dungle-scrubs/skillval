@@ -21,6 +21,11 @@ baseline-fail means the rule is load-bearing. Solo-pass with baseline-pass means
 does this on its own - the rule is a prune candidate. Preferences stay; stale capabilities go.
 Cases can record which kind they exercise with the `type` field (`capability` or `preference`).
 
+Based on my own usage, skillval's long-run effect on a skill library is not shrinkage. Most rules
+either earn their keep or have not been disproven yet; what accumulates instead is a ledger of
+which rules still change behavior, on which models. Pruning happens rule by rule, model by model,
+as frontier models absorb what the skills teach - and until the evidence is in, the rule stays.
+
 ### Reading a result
 
 - **`solo` pass, `baseline` fail** - the skill is doing the work; it changed behavior. Load-bearing.
