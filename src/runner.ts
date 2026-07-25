@@ -27,8 +27,8 @@ import { armInstructionContent, INSTRUCTION_ARMS, resolveRuleFile } from "./inst
 import { resolveLoadout } from "./loadout.js";
 import type { ArmResult, CaseResult, EvalCase, RuntimeArm, TrialResult } from "./types.js";
 import { loadoutHash, sha256, skillContentHash } from "./utils.js";
-import type { Verdict } from "./verdict.js";
-import { groupVerdict, INSTRUCTION_VERDICT_TEXT, VERDICT_TEXT } from "./verdict.js";
+import type { ArmState, Verdict } from "./verdict.js";
+import { armState, groupVerdict, INSTRUCTION_VERDICT_TEXT, VERDICT_TEXT } from "./verdict.js";
 import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
 
 export interface RunOptions {
@@ -102,6 +102,8 @@ export interface RunOutcome {
   readonly failures: number;
   // Written beside the JSON report unless the configuration disables it. The CLI opens this.
   readonly htmlReportPath?: string;
+  // Cases whose deciding arm was never graded (infrastructure failures): not failures, not passes.
+  readonly inconclusives: number;
   readonly instructionFindings: number;
   readonly interferences: number;
   readonly noops: number;
@@ -286,6 +288,7 @@ export function runEvaluation(
   const instructionReports: Record<string, InstructionTargetReport> = {};
   const skillReports: Record<string, SkillReport> = {};
   let failures = 0;
+  let inconclusives = 0;
   let instructionFindings = 0;
   let noops = 0;
   let interferences = 0;
@@ -311,7 +314,8 @@ export function runEvaluation(
         ),
       );
     skillReports[skill.name] = { cases, class: evals.class, contentHash };
-    failures += cases.filter((result) => !result.pass).length;
+    failures += cases.filter((result) => !result.pass && !result.inconclusive).length;
+    inconclusives += cases.filter((result) => result.inconclusive).length;
     noops += cases.filter((result) => result.noop).length;
     interferences += cases.filter((result) => result.loadout?.verdict === "interference").length;
   }
@@ -340,7 +344,10 @@ export function runEvaluation(
     };
     const applicable = findings.filter((finding) => finding.verdict !== "n/a");
     instructionFindings += applicable.length;
-    failures += applicable.filter((finding) => !instructionGroupPassed(finding)).length;
+    failures += applicable.filter(
+      (finding) => !instructionGroupPassed(finding) && !instructionGroupUngraded(finding),
+    ).length;
+    inconclusives += applicable.filter((finding) => instructionGroupUngraded(finding)).length;
     noops += applicable.filter((finding) => {
       const evalCase = target.evals.cases.find((candidate) => candidate.id === finding.caseId);
       return evalCase !== undefined && instructionFindingIsNoop(finding, evalCase);
@@ -381,6 +388,7 @@ export function runEvaluation(
   return {
     failures,
     ...(htmlReportPath === undefined ? {} : { htmlReportPath }),
+    inconclusives,
     instructionFindings,
     interferences,
     noops,
@@ -635,7 +643,10 @@ export function computePlan(
   // The runner stores each arm's result the moment it completes, so a later arm with an identical
   // cache key reuses it within the same run. Track the keys this plan has already accounted for (in
   // the same skill/case/arm order the runner walks) so a repeat is predicted as a cache hit, not a
-  // second run - matching what a real run spends. Only meaningful when the cache is in use.
+  // second run - matching what a real run spends. Only meaningful when the cache is in use. The
+  // prediction assumes arms grade normally: an arm whose every trial hits an infrastructure failure
+  // is never cached, so a real run would re-run its same-key repeats. A dry run cannot foresee a
+  // transient runaway, so it prices the normal path rather than model a conditional state.
   const scheduledKeys = new Set<string>();
 
   for (const { contentHash, skill } of skillInputs) {
@@ -890,7 +901,7 @@ function runCase(
     if (arm === "group" && !hasPeers) {
       const solo = results.find((result) => result.arm === "solo");
       if (solo !== undefined) {
-        log(`  ${evalCase.id} [group] ${solo.pass ? "pass" : "FAIL"} (same as solo; no peers)`);
+        log(`  ${evalCase.id} [group] ${armStateLabel(solo)} (same as solo; no peers)`);
         results.push({ ...solo, arm: "group" });
         continue;
       }
@@ -909,15 +920,14 @@ function runCase(
       },
       arm,
     );
-    log(
-      `  ${evalCase.id} [${arm}] ${result.pass ? "pass" : "FAIL"}${
-        result.cached ? " (cached)" : ""
-      }`,
-    );
+    log(`  ${evalCase.id} [${arm}] ${armStateLabel(result)}${result.cached ? " (cached)" : ""}`);
     results.push(result);
   }
-  const passOf = (arm: RuntimeArm): boolean =>
-    results.find((result) => result.arm === arm)?.pass === true;
+  // A missing arm reads as "fail": it contributes no pass, and only arms that ran can be infra.
+  const stateOf = (arm: RuntimeArm): ArmState => {
+    const result = results.find((candidate) => candidate.arm === arm);
+    return result === undefined ? "fail" : armState(result);
+  };
 
   if (groupMode && context.loadout !== undefined) {
     // pass/noop follow the same "with target vs without target" shape as solo mode: the group arm
@@ -925,24 +935,52 @@ function runCase(
     // means something when the case grades behavior on it (not a pure trigger-only case, whose
     // target-specific check is skipped when the target is absent), so gate the no-op on that too.
     const peersMeaningful = hasPeerGradedAssertion(evalCase);
-    const verdict = groupVerdict(passOf("solo"), passOf("group"), passOf("peers"), peersMeaningful);
+    const verdict = groupVerdict(
+      stateOf("solo"),
+      stateOf("group"),
+      stateOf("peers"),
+      peersMeaningful,
+    );
     log(`  ${evalCase.id} verdict: ${VERDICT_TEXT[verdict]}`);
     return {
       arms: results,
       id: evalCase.id,
       loadout: { name: context.loadout.name, verdict },
-      noop: peersMeaningful && passOf("peers"),
-      pass: passOf("group"),
       rule: evalCase.rule,
+      ...caseOutcome(stateOf("group"), stateOf("peers"), peersMeaningful),
     };
   }
   return {
     arms: results,
     id: evalCase.id,
-    noop: passOf("baseline"),
-    pass: passOf("solo"),
     rule: evalCase.rule,
+    ...caseOutcome(stateOf("solo"), stateOf("baseline"), true),
   };
+}
+
+// The case-level outcome shared by solo and group mode. The deciding arm carries the with-target
+// result (solo arm in solo mode, group arm in group mode); the control arm is the without-target
+// comparison (baseline, or peers when the case grades behavior on peers). An ungraded deciding arm
+// makes the case inconclusive - neither a pass nor a content failure - and disqualifies any no-op
+// claim: a passing control beside an ungraded deciding arm proves nothing about the target and must
+// not surface a prune candidate. An ungraded control simply cannot claim a no-op (it did not pass).
+export function caseOutcome(
+  deciding: ArmState,
+  control: ArmState,
+  controlMeaningful: boolean,
+): { readonly inconclusive: boolean; readonly noop: boolean; readonly pass: boolean } {
+  return {
+    inconclusive: deciding === "infra",
+    noop: deciding !== "infra" && controlMeaningful && control === "pass",
+    pass: deciding === "pass",
+  };
+}
+
+// One arm's outcome for run logs: infra is called out as ungraded, never conflated with FAIL.
+function armStateLabel(result: ArmResult): string {
+  const state = armState(result);
+  if (state === "infra") return "infra (not graded)";
+  return state === "pass" ? "pass" : "FAIL";
 }
 
 // The cache identity for one arm. Shared by runArm and planEvaluation so the trials a dry run
@@ -1019,17 +1057,20 @@ function runInstructionCase(
       },
       arm,
     );
-    log(
-      `  ${evalCase.id} [${arm}] ${result.pass ? "pass" : "FAIL"}${
-        result.cached ? " (cached)" : ""
-      }`,
-    );
+    log(`  ${evalCase.id} [${arm}] ${armStateLabel(result)}${result.cached ? " (cached)" : ""}`);
     return result;
   });
-  const passOf = (arm: RuntimeArm): boolean =>
-    arms.find((result) => result.arm === arm)?.pass === true;
+  const stateOf = (arm: RuntimeArm): ArmState => {
+    const result = arms.find((candidate) => candidate.arm === arm);
+    return result === undefined ? "fail" : armState(result);
+  };
   const peersMeaningful = hasPeerGradedAssertion(evalCase);
-  const verdict = groupVerdict(passOf("solo"), passOf("group"), passOf("peers"), peersMeaningful);
+  const verdict = groupVerdict(
+    stateOf("solo"),
+    stateOf("group"),
+    stateOf("peers"),
+    peersMeaningful,
+  );
   const finding: InstructionFinding = {
     action: instructionAction(verdict),
     arms,
@@ -1076,8 +1117,15 @@ function instructionGroupPassed(finding: InstructionFinding): boolean {
   return finding.arms.find((arm) => arm.arm === "group")?.pass === true;
 }
 
+// The finding's whole-file arm was never graded (all trials were infrastructure failures), so the
+// finding carries no content result: not a failure, and disqualified from any no-op claim.
+function instructionGroupUngraded(finding: InstructionFinding): boolean {
+  return finding.arms.find((arm) => arm.arm === "group")?.infrastructure === true;
+}
+
 function instructionFindingIsNoop(finding: InstructionFinding, evalCase: EvalCase): boolean {
   return (
+    !instructionGroupUngraded(finding) &&
     hasPeerGradedAssertion(evalCase) &&
     finding.arms.find((arm) => arm.arm === "peers")?.pass === true
   );

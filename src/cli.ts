@@ -47,7 +47,7 @@ program
 program
   .command("run")
   .description(
-    "Run selected cases and return a report whose exit status fails when any target arm fails",
+    "Run selected cases and return a report; exits 1 when any case fails, 2 when nothing failed but a case was inconclusive (its deciding arm hit only infrastructure failures)",
   )
   .argument("[target...]", "skill names or instruction target IDs; omit to run every ready target")
   .option("--case <id>", "run only the case with this id")
@@ -120,11 +120,21 @@ program
           `interference alert: ${outcome.interferences} case(s) work alone but the loadout breaks them`,
         );
       }
+      if (outcome.inconclusives > 0) {
+        console.log(
+          `inconclusive: ${outcome.inconclusives} case(s) hit infrastructure failures and were not graded - rerun to grade them`,
+        );
+      }
       console.log(
-        outcome.failures === 0 ? "all cases passed" : `${outcome.failures} case(s) FAILED`,
+        outcome.failures > 0
+          ? `${outcome.failures} case(s) FAILED`
+          : outcome.inconclusives > 0
+            ? "all graded cases passed"
+            : "all cases passed",
       );
     }
-    process.exitCode = outcome.failures > 0 ? 1 : 0;
+    // Inconclusive-only runs exit 2: not a content failure, but not a clean pass a script may act on.
+    process.exitCode = outcome.failures > 0 ? 1 : outcome.inconclusives > 0 ? 2 : 0;
   });
 
 program

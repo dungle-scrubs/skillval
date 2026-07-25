@@ -58,6 +58,9 @@ export interface LoadoutResult {
 export interface CaseResult {
   readonly arms: readonly ArmResult[];
   readonly id: string;
+  // True when the arm that decides pass/fail was never graded (an infrastructure failure), so the
+  // case has no content result: it is neither a failure nor a pass, and it can never flag a no-op.
+  readonly inconclusive: boolean;
   readonly loadout?: LoadoutResult;
   readonly noop: boolean;
   readonly pass: boolean;
