@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
-import { spawnAgent } from "./spawn.js";
+import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -84,6 +84,7 @@ export class ClaudeExecutor implements Executor {
       env: environment,
     });
     if (result.status !== 0) {
+      throwIfProviderUnavailable("claude", `${result.stderr}\n${result.stdout.slice(-2000)}`);
       throw new Error(`claude -p exited ${result.status}: ${result.stderr.slice(-500)}`);
     }
 

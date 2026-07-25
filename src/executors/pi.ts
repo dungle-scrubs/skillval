@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, pathTargetsSkillMarkdown } from "../utils.js";
-import { spawnAgent } from "./spawn.js";
+import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -141,6 +141,7 @@ export class PiExecutor implements Executor {
       // (SIGTERM) is not mistaken for a fast exit. Overflow and timeout are already raised as a
       // typed ExecutorInfraError inside spawnAgent, so this only sees genuine agent-side failures.
       const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
+      throwIfProviderUnavailable("pi", `${result.stderr}\n${result.stdout.slice(-2000)}`);
       const how = result.signal !== null ? `killed by ${result.signal}` : `exited ${result.status}`;
       throw new Error(`pi -p ${how}: ${detail}`);
     }

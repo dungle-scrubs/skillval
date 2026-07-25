@@ -1,6 +1,10 @@
 import { execPath } from "node:process";
 import { describe, expect, it } from "vitest";
-import { ExecutorInfraError, spawnAgent } from "../src/executors/spawn.js";
+import {
+  ExecutorInfraError,
+  spawnAgent,
+  throwIfProviderUnavailable,
+} from "../src/executors/spawn.js";
 
 // Drive a real child (node) rather than a real agent CLI: the classification logic under test is
 // process-outcome handling, and a trivial node one-liner exercises every branch deterministically.
@@ -67,5 +71,25 @@ describe("spawnAgent", () => {
     }
     expect(thrown).toBeInstanceOf(ExecutorInfraError);
     expect((thrown as ExecutorInfraError).kind).toBe("timeout");
+  });
+});
+
+describe("throwIfProviderUnavailable", () => {
+  it("classifies quota, rate-limit, and auth refusals as infrastructure", () => {
+    for (const output of [
+      "You've hit your usage limit. Visit settings to purchase more credits",
+      "429 Too Many Requests",
+      "error: invalid api key provided",
+      "rate limited, retry later",
+    ]) {
+      expect(() => throwIfProviderUnavailable("codex", output)).toThrow(ExecutorInfraError);
+    }
+  });
+
+  it("lets ordinary agent failures pass through to the executor's own error", () => {
+    expect(() =>
+      throwIfProviderUnavailable("codex", "error: model refused to complete the task"),
+    ).not.toThrow();
+    expect(() => throwIfProviderUnavailable("pi", "TypeError: x is not a function")).not.toThrow();
   });
 });

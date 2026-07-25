@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
-import { spawnAgent } from "./spawn.js";
+import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -88,6 +88,8 @@ export class CodexExecutor implements Executor {
       env: environment,
     });
     if (result.status !== 0) {
+      // Quota/auth refusals arrive on stdout as turn.failed events; check both streams.
+      throwIfProviderUnavailable("codex", `${result.stderr}\n${result.stdout.slice(-2000)}`);
       throw new Error(`codex exec exited ${result.status}: ${result.stderr.slice(-500)}`);
     }
 
