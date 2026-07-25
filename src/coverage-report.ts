@@ -8,6 +8,7 @@ import type {
 } from "./coverage.js";
 import { RUNG_ORDER } from "./coverage.js";
 import { escapeHtml } from "./html-report.js";
+import { renderReportNav, renderTermPanels, TERM_STYLES, termButton } from "./report-terms.js";
 
 // What each rung proves, worded for the segment tooltips and the legend. The ladder comes from the
 // skillval-coverage skill: invocation -> lexical output -> runtime behavior.
@@ -53,8 +54,10 @@ export function renderCoverageReport(
     ${report.skillCount} skills &middot; grader rungs: trigger-only &rarr; regex &rarr; execution
     &middot; ${escapeHtml(context.generatedAt)}
   </p>
+  ${renderReportNav("coverage")}
 </header>
 
+${renderPrimer()}
 ${renderNotices(report)}
 ${report.skillCount === 0 ? renderEmptyState() : renderBody(report, behavioralShare)}
 
@@ -63,9 +66,31 @@ ${report.skillCount === 0 ? renderEmptyState() : renderBody(report, behavioralSh
   The t / r / x column is the per-rung case count. Expand a skill for its case-level graders.
   Source of truth: each skill's <code>skillval.yml</code>.</p>
 </footer>
+${renderTermPanels()}
 </body>
 </html>
 `;
+}
+
+// The collapsed 20-second refresher. The design assumption is a reader who has forgotten how
+// skillval works: the primer re-teaches the grader ladder, and every load-bearing term opens a
+// quick-view at point of use.
+function renderPrimer(): string {
+  return `<details class="primer">
+<summary>New here, or it has been a while? The 20-second version</summary>
+<div class="primer-body">
+  <p>Every eval case earns its rung from its strongest grader.
+  ${termButton("trigger", "Trigger-only")} proves the skill loads (or stays quiet) when it
+  should - and nothing more. ${termButton("regex", "Regex")} proves text patterns in the output,
+  which a comment can satisfy. ${termButton("execution", "Execution")} runs the produced code and
+  grades what it does. ${termButton("ungraded", "Ungraded")} means no grader at all.</p>
+  <p>Behavioral cases can also run a ${termButton("baseline", "baseline")} arm: the same prompt
+  with no skill installed. When that control passes too, the rule is a
+  ${termButton("no-op", "no-op")} - the model already behaves that way unaided.</p>
+  <p>Coverage answers "what is graded"; the Latest run tab answers "what happened".
+  Every dotted term on this page opens a refresher.</p>
+</div>
+</details>`;
 }
 
 // Discovery diagnostics stay on the page: a report over a silently narrowed universe would read as
@@ -115,14 +140,14 @@ function renderBody(report: CoverageReport, behavioralShare: number): string {
     ${RUNG_ORDER.filter((rung) => rung !== "ungraded" || report.counts.ungraded > 0)
       .map(
         (rung) =>
-          `<span class="l-${rung}"><i></i>${RUNG_LABEL[rung]} (${report.counts[rung]}) - ${escapeHtml(RUNG_MEANING[rung])}</span>`,
+          `<span class="l-${rung}"><i></i>${termButton(rung, RUNG_LABEL[rung])} (${report.counts[rung]}) - ${escapeHtml(RUNG_MEANING[rung])}</span>`,
       )
       .join("\n    ")}
   </div>
   <p class="note">
-    ${report.skillsWithBaselineComparison} of ${report.skillCount} skills compare against a baseline arm
+    ${report.skillsWithBaselineComparison} of ${report.skillCount} skills compare against a ${termButton("baseline", "baseline")} arm
     on at least one behavioral case &middot;
-    ${gapSentence(report.skillsWithoutNegativeTrigger, "without a negative trigger case", "every skill ships at least one negative trigger case (no thin boundaries)")} &middot;
+    ${gapSentence(report.skillsWithoutNegativeTrigger, `without a ${termButton("trigger", "negative trigger")} case`, `every skill ships at least one ${termButton("trigger", "negative trigger")} case (no thin boundaries)`)} &middot;
     ${gapSentence(report.skillsWithoutBehavioralCases, "with zero behavioral cases", "every skill has at least one behavioral case")}
   </p>
 </section>
@@ -293,16 +318,16 @@ h1 { font-size: 1.7rem; margin: .3rem 0 .35rem; letter-spacing: -.02em; text-wra
 .group h2 { font-size: 1.08rem; margin: 0 0 .1rem; }
 .g-meta { color: var(--muted); font-weight: 400; font-size: .84rem; margin-left: .4rem; }
 .g-root { color: var(--muted); font-family: var(--mono); font-size: .74rem; margin: 0 0 .5rem; }
-.col-head, summary { display: grid;
+.col-head, details.skill > summary { display: grid;
   grid-template-columns: minmax(11rem, 1.25fr) 6rem 3rem minmax(8rem, 1fr) 5.5rem 5rem;
   gap: .9rem; align-items: center; }
 .col-head { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em;
   color: var(--muted); padding: .25rem .85rem; }
 details.skill { background: var(--surface); border: 1px solid var(--line); border-radius: .5rem;
   margin-bottom: .45rem; }
-summary { padding: .55rem .85rem; cursor: pointer; list-style: none; }
-summary::-webkit-details-marker { display: none; }
-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: .5rem; }
+details.skill > summary { padding: .55rem .85rem; cursor: pointer; list-style: none; }
+details.skill > summary::-webkit-details-marker { display: none; }
+details.skill > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: .5rem; }
 .s-name code { font-family: var(--mono); font-size: .85rem; font-weight: 600; }
 .s-class { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
   border: 1px solid var(--line); border-radius: .3rem; padding: .1rem .4rem; text-align: center; }
@@ -330,11 +355,11 @@ code { font-family: var(--mono); font-size: .92em; }
 .page-foot { color: var(--muted); font-size: .82rem; border-top: 1px solid var(--line);
   padding-top: 1rem; margin-top: 2rem; }
 @media (max-width: 44rem) {
-  .col-head, summary { grid-template-columns: 1fr 3rem minmax(6rem, 1fr); }
+  .col-head, details.skill > summary { grid-template-columns: 1fr 3rem minmax(6rem, 1fr); }
   .s-class, .s-mix, .s-beh { display: none; }
   .col-head span:nth-child(2), .col-head span:nth-child(5), .col-head span:nth-child(6) { display: none; }
   /* The bar sits in the rightmost column on small screens; right-anchoring keeps every tooltip
      inside the viewport. */
   .seg::after, .seg:first-child::after { left: auto; right: 0; transform: none; }
 }
-`;
+${TERM_STYLES}`;

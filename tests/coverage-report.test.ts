@@ -64,6 +64,23 @@ describe("renderCoverageReport", () => {
     expect(empty).not.toContain("every skill");
   });
 
+  it("renders the report nav with Coverage active and a link to the run report", () => {
+    expect(html).toContain('<span class="tab tab-active" aria-current="page">Coverage</span>');
+    expect(html).toContain('<a class="tab" href="latest.html">Latest run</a>');
+  });
+
+  it("opens with a collapsed primer that teaches the grader ladder", () => {
+    expect(html).toContain('<details class="primer">');
+    expect(html).toContain('class="primer-body"');
+    expect(html).toContain("Every dotted term on this page opens a refresher.");
+  });
+
+  it("weaves term buttons into the prose and appends the quick-view panels", () => {
+    expect(html).toContain('popovertarget="term-regex"');
+    expect(html).toContain('popovertarget="term-baseline"');
+    expect(html).toContain('id="term-regex"');
+  });
+
   it("is a self-contained document with no scripts or external assets", () => {
     expect(html.startsWith("<!doctype html>")).toBe(true);
     expect(html).toContain("<style>");

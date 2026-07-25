@@ -188,6 +188,17 @@ leads with **what to change**: every rule flagged `delete` or `review`, with the
 on, why it was flagged (tied to the arm that proved it), and the arm evidence beside the
 recommendation. The page has no external assets or scripts and follows the system light/dark theme.
 
+Reports carry a two-tab nav (Latest run | Coverage): `latest.html` is a stable alias refreshed
+after every HTML-enabled run (with `htmlReport: false` it is left untouched and may lag or not
+exist), while the hash-named reports remain the immutable archive - an archived page labels
+itself "This run (archived)" and links to the alias rather than claiming to be the latest. A
+skills **what to change** panel derives an action per case: a no-op maps to *prune candidate*
+(surface, verify cross-model, then decide) and loadout redundancy to *review* - deliberately
+softer than the instruction mapping, where a redundant rule is a deletable line. Every
+load-bearing term is a dotted quick-view that opens a right-side explainer, and each page opens
+with a collapsed 20-second primer - the reports assume a reader who has forgotten how skillval
+works and re-teach at point of use.
+
 Turn it off with `htmlReport: false` in the configuration - useful in CI or scripted runs. Failing
 to open a browser is never a run failure; the path is always printed.
 
@@ -346,7 +357,8 @@ execution - its strongest evidence). The page shows per-rung totals, a compositi
 segments carry hover tooltips explaining each rung, and a per-root matrix - skills sorted
 weakest-coverage-first - expandable to case-level graders, arms, and trials. Gap stats call out
 skills with zero behavioral cases, skills without a negative trigger case, and how many skills
-compare against a baseline arm. `--json` returns the full coverage report as data instead. This is
+compare against a baseline arm. The page shares the run report's two-tab nav, linking to
+`latest.html` and back. `--json` returns the full coverage report as data instead. This is
 the mechanical half of the bundled skill's audit (its "read what is graded" step); the judgment
 half - what is worth writing next - stays with [the skill](#bundled-skill).
 
