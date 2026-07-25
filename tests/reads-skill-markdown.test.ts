@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readsSkillMarkdown } from "../src/utils.js";
+import { pathTargetsSkillMarkdown, readsSkillMarkdown } from "../src/utils.js";
 
 describe("readsSkillMarkdown", () => {
   it("matches the skill as a whole path segment after a slash", () => {
@@ -26,5 +26,22 @@ describe("readsSkillMarkdown", () => {
   it("treats regex metacharacters in a skill name literally", () => {
     expect(readsSkillMarkdown("cat skills/a.b/SKILL.md", "a.b")).toBe(true);
     expect(readsSkillMarkdown("cat skills/axb/SKILL.md", "a.b")).toBe(false);
+  });
+});
+
+describe("pathTargetsSkillMarkdown", () => {
+  it("matches only when the final segments are exactly <skill>/SKILL.md", () => {
+    expect(pathTargetsSkillMarkdown("/home/u/skills/orient/SKILL.md", "orient")).toBe(true);
+    expect(pathTargetsSkillMarkdown("orient/SKILL.md", "orient")).toBe(true);
+    expect(pathTargetsSkillMarkdown("/home/u/skills/orient/SKILL.md.bak", "orient")).toBe(false);
+    expect(pathTargetsSkillMarkdown("/skills/orient/SKILL.md/child.txt", "orient")).toBe(false);
+    expect(pathTargetsSkillMarkdown("/skills/commit-orient/SKILL.md", "orient")).toBe(false);
+    expect(pathTargetsSkillMarkdown("SKILL.md", "orient")).toBe(false);
+  });
+
+  it("handles Windows separators and regex metacharacters in the skill name", () => {
+    expect(pathTargetsSkillMarkdown("C:\\dev\\skills\\orient\\SKILL.md", "orient")).toBe(true);
+    expect(pathTargetsSkillMarkdown("skills/a.b/SKILL.md", "a.b")).toBe(true);
+    expect(pathTargetsSkillMarkdown("skills/axb/SKILL.md", "a.b")).toBe(false);
   });
 });

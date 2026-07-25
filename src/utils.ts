@@ -14,6 +14,15 @@ export function readsSkillMarkdown(text: string, skillName: string): boolean {
   return new RegExp(`(?:^|[^\\w-])${escaped}/SKILL\\.md`).test(text);
 }
 
+// Whether a structured file path (a tool call's actual path argument, not free command text) targets
+// the skill's SKILL.md: the final two path segments must be exactly <skillName>/SKILL.md, so a
+// sibling like SKILL.md.bak, a child path under SKILL.md, or a lookalike skill name never matches.
+// Both separators are handled so a Windows-style path is recognized.
+export function pathTargetsSkillMarkdown(path: string, skillName: string): boolean {
+  const segments = path.split(/[/\\]+/).filter((segment) => segment !== "");
+  return segments.length >= 2 && segments.at(-1) === "SKILL.md" && segments.at(-2) === skillName;
+}
+
 // Order-independent hash of the set of skills seeded in an arm. A set defines an arm, not an
 // ordering, so members are framed then sorted. Each member frames both its name and its content
 // hash, because skills install under their names: two identically-hashed skills with different
