@@ -61,8 +61,8 @@ const agentEnd = (messages: unknown[]): string =>
 const usage = { input: 100, output: 20, totalTokens: 120 };
 
 describe("parsePiTrace", () => {
-  it("reports heuristic invocation detection metadata", () => {
-    expect(PI_INVOCATION_DETECTION).toBe("heuristic");
+  it("reports structured invocation detection metadata", () => {
+    expect(PI_INVOCATION_DETECTION).toBe("structured");
   });
 
   it("collects assistant text and usage from the agent_end transcript", () => {
@@ -138,6 +138,142 @@ describe("parsePiTrace", () => {
             name: "read",
             type: "toolCall",
           },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    expect(parsePiTrace(stdout, "orient").invoked).toBe(false);
+  });
+
+  it("does not count another tool merely mentioning the skill path", () => {
+    // Only the read tool loads a skill. A write body, a grep pattern, or a bash command that
+    // mentions the path is not the progressive-disclosure event and must not count as invocation.
+    const stdout = agentEnd([
+      {
+        content: [
+          {
+            arguments: { content: "see skills/orient/SKILL.md", path: "notes.md" },
+            id: "call_1",
+            name: "write",
+            type: "toolCall",
+          },
+          {
+            arguments: { pattern: "orient/SKILL.md" },
+            id: "call_2",
+            name: "grep",
+            type: "toolCall",
+          },
+          {
+            arguments: { cmd: "cat skills/orient/SKILL.md" },
+            id: "call_3",
+            name: "bash",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    const trace = parsePiTrace(stdout, "orient");
+
+    expect(trace.invoked).toBe(false);
+    expect(trace.invocationEvidence).toBeNull();
+  });
+
+  it("does not count a read whose correlated toolResult errored", () => {
+    // Mirrors the real pi transcript shape: a failed read produces a toolResult message with
+    // isError true and the call's id. The skill never entered context, so it is not invocation.
+    const stdout = agentEnd([
+      {
+        content: [
+          {
+            arguments: { path: "/home/user/skills/orient/SKILL.md" },
+            id: "call_1",
+            name: "read",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [{ text: "ENOENT: no such file or directory", type: "text" }],
+        isError: true,
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "read",
+      },
+    ]);
+
+    expect(parsePiTrace(stdout, "orient").invoked).toBe(false);
+  });
+
+  it("counts a read whose toolResult succeeded", () => {
+    const stdout = agentEnd([
+      {
+        content: [
+          {
+            arguments: { path: "/home/user/skills/orient/SKILL.md" },
+            id: "call_1",
+            name: "read",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      },
+      {
+        content: [{ text: "# orient", type: "text" }],
+        isError: false,
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "read",
+      },
+    ]);
+
+    expect(parsePiTrace(stdout, "orient").invoked).toBe(true);
+  });
+
+  it("does not count a lookalike path that merely contains <skill>/SKILL.md", () => {
+    // The structured matcher requires the final two path segments to be exactly the skill and
+    // SKILL.md - a backup sibling or a child path under a directory named SKILL.md never counts.
+    for (const path of [
+      "/home/user/skills/orient/SKILL.md.bak",
+      "/home/user/skills/orient/SKILL.md/notes.txt",
+    ]) {
+      const stdout = agentEnd([
+        {
+          content: [{ arguments: { path }, id: "call_1", name: "read", type: "toolCall" }],
+          role: "assistant",
+        },
+      ]);
+      expect(parsePiTrace(stdout, "orient").invoked).toBe(false);
+    }
+  });
+
+  it("counts a Windows-style path targeting the skill", () => {
+    const stdout = agentEnd([
+      {
+        content: [
+          {
+            arguments: { path: "C:\\Users\\dev\\skills\\orient\\SKILL.md" },
+            id: "call_1",
+            name: "read",
+            type: "toolCall",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    expect(parsePiTrace(stdout, "orient").invoked).toBe(true);
+  });
+
+  it("does not count a read toolCall without a string path argument", () => {
+    const stdout = agentEnd([
+      {
+        content: [
+          { arguments: "skills/orient/SKILL.md", id: "call_1", name: "read", type: "toolCall" },
+          { arguments: { path: 42 }, id: "call_2", name: "read", type: "toolCall" },
         ],
         role: "assistant",
       },

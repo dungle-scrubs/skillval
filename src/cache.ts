@@ -10,7 +10,10 @@ import { sha256 } from "./utils.js";
 // 13: instruction-file arms and the instructionHash cache-identity field.
 // 14: agent stdout captured with a 256MB cap; overflow/timeout recorded as an infrastructure
 //     failure instead of a content result, changing the verdict of large-output trials.
-export const RUNNER_VERSION = 14;
+// 15: trigger detection changed - pi is structured (read toolCall path only; other tools
+//     mentioning the path no longer count), codex counts only completed exit-0 commands - so
+//     cached should_trigger results could decode differently.
+export const RUNNER_VERSION = 15;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

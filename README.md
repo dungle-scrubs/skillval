@@ -495,8 +495,12 @@ codex exec --json --skip-git-repo-check --ephemeral -s <sandbox> -C <workspace> 
 ```
 
 Trigger cases use a read-only sandbox. Generation cases use `workspace-write`. Codex has no
-dedicated skill-invocation event, so its adapter detects invocation when a `command_execution`
-command contains `<skill>/SKILL.md`. Each arm seeds its own skills as workspace-local
+dedicated skill-invocation event, so its adapter detects invocation when a **completed**
+`command_execution` command contains `<skill>/SKILL.md`. A started-but-unfinished command never
+counts, and a failed *simple* command (a lone `cat` of a missing path) does not either - it
+provably never loaded the skill. A compound command's aggregate exit status cannot attribute
+failure to the read itself (`cat SKILL.md && rg no-match` exits 1 with the skill already in
+context), so a compound command counts on completion regardless of exit code. Each arm seeds its own skills as workspace-local
 `.agents/skills/<name>` symlinks - the `solo` arm the evaluated skill, the `baseline` arm none.
 
 Every arm runs clean: `HOME` points to an empty temporary directory so `~/.agents/skills` is
@@ -537,7 +541,11 @@ seeds nothing - no HOME or config redirection is involved.
 Trigger cases restrict tools with `-t read` (read also loads SKILL.md, so invocation stays
 observable); generation cases keep pi's default tool set. pi implements the Agent Skills
 progressive-disclosure standard by having the model `read` a listed skill's SKILL.md, so
-invocation is detected from `read` toolCalls targeting `<skill>/SKILL.md` in the transcript.
+invocation is detected structurally: a `read` toolCall whose `path` argument's final segments are
+exactly `<skill>/SKILL.md`, and whose correlated toolResult did not error - a read that failed
+(missing file, denied) never put the skill into context. Another tool merely mentioning the path
+(a grep pattern, a write body) does not count, and neither does a shell-based read in a
+generation arm - the `read` tool is the skill-loading mechanism.
 The reported model is `defaultProvider/defaultModel` from `~/.pi/settings.json`. pi resolves
 provider API keys from its auth file or environment variables (e.g. `ZAI_API_KEY`) - the key
 must be available in the environment running skillval.
@@ -550,9 +558,11 @@ acknowledge the missing sandbox. Trigger cases are read-only and unaffected. Pre
 for untrusted generation cases.
 
 Each adapter reports its detection method as `invocationDetection` in report metadata. The
-`invoked` signal has asymmetric confidence: claude detects invocation from a structured `Skill`
-tool_use block, while codex and pi string-match trace text for `<skill>/SKILL.md`. Trigger rates
-should not be compared across executors as if they measured the same thing.
+`invoked` signal still has asymmetric confidence: claude (a `Skill` tool_use block) and pi (a
+`read` toolCall's path argument) are `structured` - they parse the executor's actual
+skill-loading event - while codex is `heuristic`: it has no such event, so its adapter
+string-matches successful command text for `<skill>/SKILL.md`. Trigger rates should not be
+compared across executors as if they measured the same thing.
 
 By default, executors do not set a model or thinking/effort level; trials inherit the harness
 defaults the user has configured, and each adapter captures both into its identity so results are
@@ -567,7 +577,8 @@ Cached arm results are keyed by runner version, skill content hash, serialized c
 name, executor version, configured model, and configured thinking level. Instruction arms add a
 content hash of the resolved instruction file the arm seeds, because two instruction cases can share
 identical case JSON while their surrounding rules differ - the seeded content, not just the case,
-must key the arm. A trial has a 15-minute timeout and a 64 MB output buffer.
+must key the arm. A trial has a 15-minute timeout and a 256 MB output cap; exceeding either is
+recorded as an infrastructure failure, not a content result.
 
 For instruction targets, each adapter writes the arm's resolved file under the name it reads
 natively, with no filename translation, and pi additionally redirects `PI_CODING_AGENT_DIR` and

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
-import { isRecord, readsSkillMarkdown } from "../utils.js";
+import { isRecord, pathTargetsSkillMarkdown } from "../utils.js";
 import { spawnAgent } from "./spawn.js";
 import {
   assertEffortSupported,
@@ -25,7 +25,10 @@ export const PI_EFFORT_LEVELS: readonly string[] = [
   "high",
   "xhigh",
 ];
-export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "heuristic";
+// Structured: pi's skill invocation is the `read` tool loading the skill's SKILL.md (the Agent
+// Skills progressive-disclosure mechanism), so detection parses read toolCalls' path argument
+// rather than string-matching the whole trace.
+export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = "structured";
 
 // Every arm runs clean: --no-skills hides the user's global skill library, and a repeatable --skill
 // seeds exactly this arm's set on top. pi loads explicit --skill paths even under --no-skills
@@ -204,21 +207,41 @@ export function parsePiTrace(stdout: string, skillName: string): Trace {
     // agent_end carries the complete transcript, so it is the single authoritative source.
     if (event.type !== "agent_end" || !Array.isArray(event.messages)) continue;
     completed = true;
+    // A read that errored (missing file, denied) never put the skill into context, so a toolCall
+    // only counts when its correlated toolResult did not fail. Collected first: the result message
+    // always follows its call in the transcript, but one pass over ids keeps the check order-free.
+    const failedToolCallIds = new Set<string>();
+    for (const message of event.messages) {
+      if (!isRecord(message) || message.role !== "toolResult") continue;
+      if (message.isError === true && typeof message.toolCallId === "string") {
+        failedToolCallIds.add(message.toolCallId);
+      }
+    }
     for (const message of event.messages) {
       if (!isRecord(message) || message.role !== "assistant") continue;
       if (!Array.isArray(message.content)) continue;
       for (const block of message.content) {
         if (!isRecord(block)) continue;
         if (block.type === "text" && typeof block.text === "string") texts.push(block.text);
+        // pi implements Agent Skills progressive disclosure by having the model `read` a listed
+        // skill's SKILL.md, so a successful read toolCall whose path targets it IS the invocation
+        // event - structural, like claude's Skill tool_use. Matching only the read tool's path
+        // field means another tool merely mentioning the path (a grep pattern, a write body, a
+        // bash echo) is not counted as invocation. Shell-based reads in generation arms do not
+        // count either: they are not the skill-loading mechanism, and trigger arms restrict tools
+        // to read anyway.
         if (
           block.type === "toolCall" &&
-          // Whole path segment so a peer skill named "commit-<name>" is not attributed to target
-          // "<name>" in a group arm, while relative reads still match.
-          readsSkillMarkdown(JSON.stringify(block.arguments ?? ""), skillName)
+          block.name === "read" &&
+          isRecord(block.arguments) &&
+          typeof block.arguments.path === "string" &&
+          // Exact final path segments (<skill>/SKILL.md), so a lookalike such as SKILL.md.bak or
+          // a peer skill named "commit-<name>" is never attributed to target "<name>".
+          pathTargetsSkillMarkdown(block.arguments.path, skillName) &&
+          !(typeof block.id === "string" && failedToolCallIds.has(block.id))
         ) {
           invoked = true;
-          const name = typeof block.name === "string" ? block.name : "toolCall";
-          invocationEvidence ??= `${name} toolCall: ${JSON.stringify(block.arguments ?? null)}`;
+          invocationEvidence ??= `read toolCall: ${JSON.stringify(block.arguments)}`;
         }
       }
       usage = message.usage ?? usage;

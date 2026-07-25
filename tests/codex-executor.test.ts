@@ -11,8 +11,15 @@ const turnCompleted = line({
   usage: { input_tokens: 100, output_tokens: 20 },
 });
 
-const commandExecution = (command: string): string =>
-  line({ item: { command, type: "command_execution" }, type: "item.completed" });
+const commandExecution = (command: string, exitCode?: number): string =>
+  line({
+    item: {
+      command,
+      ...(exitCode === undefined ? {} : { exit_code: exitCode }),
+      type: "command_execution",
+    },
+    type: "item.completed",
+  });
 
 describe("parseCodexTrace", () => {
   it("reports heuristic invocation detection metadata", () => {
@@ -73,6 +80,96 @@ describe("parseCodexTrace", () => {
 
     expect(trace.invoked).toBe(false);
     expect(trace.invocationEvidence).toBeNull();
+  });
+
+  it("does not count a started-but-unfinished command as invocation", () => {
+    // item.started carries the same command as its later item.completed; only completion proves
+    // the read actually happened, and counting both would also double-report evidence.
+    // Mirrors the real codex JSONL shape: a started item carries exit_code null, in_progress.
+    const stdout = [
+      line({
+        item: {
+          command: "cat .agents/skills/orient/SKILL.md",
+          exit_code: null,
+          status: "in_progress",
+          type: "command_execution",
+        },
+        type: "item.started",
+      }),
+      turnCompleted,
+    ].join("\n");
+
+    expect(parseCodexTrace(stdout, "orient").invoked).toBe(false);
+  });
+
+  it("does not count a failed read as invocation", () => {
+    // A command that exited nonzero (missing file, typo) never loaded the skill.
+    const stdout = [commandExecution("cat .agents/skills/orient/SKILL.md", 1), turnCompleted].join(
+      "\n",
+    );
+
+    expect(parseCodexTrace(stdout, "orient").invoked).toBe(false);
+  });
+
+  it("counts a completed exit-0 read, and tolerates a missing or null exit_code", () => {
+    const withExit = parseCodexTrace(
+      [commandExecution("cat .agents/skills/orient/SKILL.md", 0), turnCompleted].join("\n"),
+      "orient",
+    );
+    expect(withExit.invoked).toBe(true);
+
+    // Older codex JSONL without a numeric exit_code on the completed item still counts, unless
+    // the item's status says the command failed.
+    const withoutExit = parseCodexTrace(
+      [commandExecution("cat .agents/skills/orient/SKILL.md"), turnCompleted].join("\n"),
+      "orient",
+    );
+    expect(withoutExit.invoked).toBe(true);
+
+    const nullExit = parseCodexTrace(
+      [
+        line({
+          item: {
+            command: "cat .agents/skills/orient/SKILL.md",
+            exit_code: null,
+            status: "completed",
+            type: "command_execution",
+          },
+          type: "item.completed",
+        }),
+        turnCompleted,
+      ].join("\n"),
+      "orient",
+    );
+    expect(nullExit.invoked).toBe(true);
+
+    const failedStatus = parseCodexTrace(
+      [
+        line({
+          item: {
+            command: "cat .agents/skills/orient/SKILL.md",
+            exit_code: null,
+            status: "failed",
+            type: "command_execution",
+          },
+          type: "item.completed",
+        }),
+        turnCompleted,
+      ].join("\n"),
+      "orient",
+    );
+    expect(failedStatus.invoked).toBe(false);
+  });
+
+  it("counts a failed compound command whose read still loaded the skill", () => {
+    // The aggregate exit status belongs to the whole command: here the cat succeeded and the
+    // skill entered context before rg exited 1 on no-match, so the read must still count.
+    const stdout = [
+      commandExecution("cat .agents/skills/orient/SKILL.md && rg no-such-pattern src", 1),
+      turnCompleted,
+    ].join("\n");
+
+    expect(parseCodexTrace(stdout, "orient").invoked).toBe(true);
   });
 
   it("reports incomplete traces without turn.completed and survives malformed lines", () => {

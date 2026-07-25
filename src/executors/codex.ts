@@ -148,6 +148,18 @@ export function detectCodex(realHome = homedir()): ExecutorMetadata {
   };
 }
 
+// Whether a completed command that mentions the skill's SKILL.md actually loaded it. A failed
+// SIMPLE command (a lone `cat <path>` against a missing file) provably did not. A compound
+// command's aggregate exit status cannot attribute failure to the read itself - `cat SKILL.md &&
+// rg no-match` exits 1 with the skill already in context - so a compound command counts on
+// completion regardless of exit. Codex traces report exit_code as a number on completed items;
+// a nullish code (older JSONL) is treated as unknown and only status "failed" rejects it.
+function commandLoadedSkill(item: Record<string, unknown>): boolean {
+  if (typeof item.command === "string" && /[;&|]/.test(item.command)) return true;
+  if (item.status === "failed") return false;
+  return typeof item.exit_code !== "number" || item.exit_code === 0;
+}
+
 export function parseCodexTrace(stdout: string, skillName: string): Trace {
   let completed = false;
   let invoked = false;
@@ -166,11 +178,16 @@ export function parseCodexTrace(stdout: string, skillName: string): Trace {
     if (!isRecord(event)) continue;
     const item = isRecord(event.item) ? event.item : undefined;
     if (
+      // Only a completed command counts: an item.started line for the same command must not
+      // double-report an execution that may still fail. Codex has no dedicated skill-invocation
+      // event, so this stays a heuristic over the command text - hardened, not structured.
+      event.type === "item.completed" &&
       item?.type === "command_execution" &&
       typeof item.command === "string" &&
       // Whole path segment so a peer skill named "commit-<name>" is not attributed to target
       // "<name>" in a group arm, while relative reads still match.
-      readsSkillMarkdown(item.command, skillName)
+      readsSkillMarkdown(item.command, skillName) &&
+      commandLoadedSkill(item)
     ) {
       invoked = true;
       invocationEvidence ??= `command_execution: ${item.command}`;
