@@ -38,56 +38,13 @@ cases:
       must_match: ['payments', '[Cc]apabilit|decay|expire|no-?op']
     trials: 1
 
-  # The safety behavior for the script-migration advice, and what makes it
-  # non-damaging: a decidable check (LICENSE exists) is worth a tested script; a
-  # judgment ("README is well-written") is not scriptable and stays prose. A
-  # baseline tends to over-script the judgment rule and to forget the test
-  # obligation - the two behaviors asserted here. May need tuning after a run.
-  - id: refuse-to-script-judgment
-    mode: trigger
-    type: capability
-    rule: script-only-decidable-checks
-    arms: [solo, baseline]
-    prompt: |-
-      Two rules in my skill. For each, tell me whether it should become a
-      script under scripts/, a skillval case, or stay prose - and why.
-
-      1. "Before release, verify a LICENSE file exists at the repo root."
-      2. "Before release, verify the README is well-written and complete."
-
-      Just advise.
-    assert:
-      # Pairs the scriptable check with a shipped test, and refuses to script
-      # the judgment rule - the damage this advice exists to prevent.
-      must_match:
-        - 'test|unit|fixture|known-bad'
-        - "[Jj]udgment|subjective|not a script|stays? prose|can'?t be scripted"
-    trials: 1
-
-  # Dynamic mode: reads output behind a verdict. Given a solo FAIL whose got:
-  # snippet plainly contains the behavior, it must blame the assert, not the
-  # skill - and re-key on the real discriminator, not declare the skill broken.
-  - id: diagnose-false-fail
-    mode: trigger
-    type: capability
-    rule: read-output-behind-verdict
-    arms: [solo, baseline]
-    prompt: |-
-      A skillval case for "structured boundary logging" failed on the solo
-      arm. The assert was:
-        must_match: ['correlationId', '(log|logger)\.']
-      The report's got: snippet for the produced file shows:
-        type BoundaryLogEvent = { level: string; event: string;
-          correlationId: string; module: "PaymentClient" };
-        emit(event: BoundaryLogEvent) { queue.push(event); }
-      Did the skill fail, and what should I do? Just advise.
-    assert:
-      # Identifies the assert as wrong (the behavior is present) and fixes the
-      # pattern, rather than concluding the skill is broken.
-      must_match:
-        - "[Aa]ssert|pattern|regex|too strict|logger"
-        - "correlationId|discriminat|present|did produce|not.{0,15}broken"
-    trials: 1
+  # PRUNED 2026-07-25: refuse-to-script-judgment (rule
+  # script-only-decidable-checks) and diagnose-false-fail (rule
+  # read-output-behind-verdict) were confirmed no-ops on BOTH gpt-5.6-sol and
+  # GLM-5.2 - baselines natively refuse to script judgment calls (pairing
+  # scripts with tests) and natively blame a mis-keyed assert when the got:
+  # snippet contains the behavior. The corresponding teaching was compressed
+  # in SKILL.md; cases that cannot change a decision are ceremony.
 
   # The safety case, and the spine of dynamic mode: when both arms produce the
   # same thing, it must call the case a no-op - NOT invent a regex to separate
@@ -107,7 +64,10 @@ cases:
       # Refuses to tune a discriminator onto identical output; names it a no-op.
       must_match:
         - "no-?op|already does|prune|redundant|same|identical"
-        - "should not|don'?t|can'?t|isn'?t.{0,20}legitimate|game|not.{0,15}separate"
+        # Models write curly apostrophes: don’t. Both apostrophe forms (and none) match,
+        # so the refusal is graded on substance, not typography - the false-fail this
+        # pattern produced was itself diagnosed by this skill's own doctrine.
+        - "should not|don['’]?t|can['’]?t|isn['’]?t.{0,20}legitimate|game|not.{0,15}separate"
     trials: 1
 
   # Fires on a coverage-strategy request.

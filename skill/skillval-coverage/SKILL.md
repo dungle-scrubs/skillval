@@ -1,6 +1,6 @@
 ---
 name: skillval-coverage
-description: "Audit eval coverage for the agent skills skillval discovers and decide what is worth testing, and diagnose ineffective tests by reading run output. Use when the user asks which skills or rules need skillval cases, wants to find eval gaps or coverage opportunities, asks whether a particular rule is worth a case, wants to spot stale cases to prune, or asks why a case failed / passed / whether a verdict can be trusted / how to fix a flaky or misleading case. Guides the keep / prune / stop and fix-the-case decisions; it diagnoses and proposes, it does not silently rewrite or run case files."
+description: "Audit eval coverage for the agent skills skillval discovers and decide what is worth testing, and diagnose ineffective tests by reading run output. Use when the user asks which skills or rules need skillval cases, wants to find eval gaps or coverage opportunities, asks whether a particular rule is worth a case, wants to spot stale cases to prune, or asks why a case failed / passed / whether a verdict can be trusted / how to fix a flaky or misleading case. Guides the keep / prune / stop and fix-the-case decisions; it diagnoses and proposes, it does not silently rewrite or run case files. Not for simply running a suite or reporting whether it passes - executing skillval and reading a green result is plain usage with no coverage judgment involved; reach for this skill only when a decision about cases themselves is on the table."
 metadata:
   icon: 🎯
 ---
@@ -144,28 +144,11 @@ behavior you grade across trials. Suggest the rewrite: it improves testability
 and removes the rule from the flaky eval surface entirely.
 
 This is a suggestion to improve testability, not a mandate to restructure the
-skill - skillval does not rewrite skills for their own sake. Recommend moving a
-rule to a script only when it clears every gate:
-
-- **Decidable** - a definite right answer from inspecting state, not a judgment.
-  "Does the README have an Install heading" is decidable; "is the README good"
-  is not. The regex-able proxy is not the real question, and scripting it
-  launders a judgment into a checkbox.
-- **Stable** - what the script inspects drifts slower than the script will be
-  maintained. File shapes and config fields qualify; a remote API's responses
-  do not - they rot silently green.
-- **Testable** - you can name the input the script must catch and fail on, and
-  that test ships with the script. If you cannot name the failing input, the
-  rule is not understood well enough to script; it stays prose.
-- **Detection or a literal fix only** - never suggest scripting "author",
-  "decide", or "improve".
-
-The caveat that makes this advice safe: **a wrong script is worse than an
-untested prose rule.** Prose poses a question the model may answer well; a bad
-script closes the question with a green checkmark that stops anyone looking
-again. So default to leaving prose alone, pair every script suggestion with the
-test the script must ship, and when a rule fails any gate say so plainly and
-leave it as prose. Never suggest scripting a judgment call.
+skill. Pair every script suggestion with the test it must ship, and never
+script a judgment call. (PRUNED 2026-07-25: the gate checklist - decidable /
+stable / testable / detection-only - and the wrong-script-worse-than-prose
+caveat were a confirmed no-op on gpt-5.6-sol and GLM-5.2: models hold the
+distinction natively; the two retained sentences are the procedural remainder.)
 
 ## Stopping rules
 
@@ -246,11 +229,11 @@ to pass is worse than one that fails honestly - it is the false-verdict failure,
 now baked into the suite. Fixing a false verdict and gaming a test look
 identical from the diff; only the direction of the adjustment tells them apart.
 
-Which verdicts to read behind, and what each usually means:
+Which verdicts to read behind, and what each usually means (PRUNED 2026-07-25:
+the generic solo-fail diagnosis - read the got:, and if the behavior is present
+the assert is wrong, not the skill - was a confirmed no-op on gpt-5.6-sol and
+GLM-5.2; the bullets that remain are skillval-specific knowledge):
 
-- **`solo` fail** - real skill gap, or a broken assert? Read the `got:`. If the
-  produced output contains the behavior and the pattern missed it, the assert is
-  wrong, not the skill. Re-key it on what actually differs between the arms.
 - **`solo` fail + `baseline` pass** ("the skill did worse") - almost never real.
   Suspect a broken assert or a contaminated `baseline` (a prompt that names the
   skill's install path, so the baseline arm reads the real skill). Fix the
