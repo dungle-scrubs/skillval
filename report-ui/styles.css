@@ -121,6 +121,15 @@
   }
 }
 
+/* Inline code reads as code everywhere: a chip on bare code elements, but never inside pre
+   blocks, which carry their own surface. */
+code:not(pre code) {
+  background: color-mix(in oklab, var(--muted) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0.08rem 0.3rem;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
