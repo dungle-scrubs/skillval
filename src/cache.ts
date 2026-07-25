@@ -13,7 +13,9 @@ import { sha256 } from "./utils.js";
 // 15: trigger detection changed - pi is structured (read toolCall path only; other tools
 //     mentioning the path no longer count), codex counts only completed exit-0 commands - so
 //     cached should_trigger results could decode differently.
-export const RUNNER_VERSION = 15;
+// 16: provider-availability failures (quota, rate limit, auth) classify as infrastructure
+//     instead of content run-failures, so such trials change outcome and must not be reused.
+export const RUNNER_VERSION = 16;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

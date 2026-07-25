@@ -12,17 +12,40 @@ import { spawnSync } from "node:child_process";
 export const AGENT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
 export const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 
-// A capture-layer failure: the trial yielded no usable trace because the output was too large to
-// buffer or the run exceeded its wall-clock budget. The runner records it under a dedicated check
-// name so it is never confused with a graded skill result. Distinct from a nonzero agent exit,
-// which stays a per-executor error.
+// A capture-layer or provider-layer failure: the trial yielded no usable trace for reasons
+// unrelated to whether the skill works - output too large to buffer, wall-clock budget exceeded,
+// or the provider refusing to serve at all (quota, rate limit, auth). The runner records it under
+// a dedicated check name so it is never confused with a graded skill result, excludes it from the
+// vote, and never caches it. An ordinary nonzero agent exit stays a per-executor error.
 export class ExecutorInfraError extends Error {
-  public readonly kind: "output-too-large" | "timeout";
+  public readonly kind: "output-too-large" | "provider-unavailable" | "timeout";
 
-  public constructor(message: string, kind: "output-too-large" | "timeout") {
+  public constructor(
+    message: string,
+    kind: "output-too-large" | "provider-unavailable" | "timeout",
+  ) {
     super(message);
     this.kind = kind;
     this.name = "ExecutorInfraError";
+  }
+}
+
+// Signatures of a provider refusing service on a nonzero exit. Deliberately narrow and literal:
+// each phrase names an account/limit condition no agent output legitimately produces as its own
+// failure mode. Observed live: codex burning through its usage quota mid-suite recorded 29 trials
+// as content FAILs and cached them - exactly the false-verdict class the infra path exists for.
+const PROVIDER_UNAVAILABLE_PATTERN =
+  /usage limit|rate.?limit(ed)?|quota exceeded|too many requests|insufficient credit|purchase more credits|billing|invalid api key|no api key|not authenticated|401 unauthorized/i;
+
+// Classifies a failed spawn's output: a provider-availability failure throws the typed infra
+// error; anything else returns so the executor raises its own descriptive error.
+export function throwIfProviderUnavailable(command: string, output: string): void {
+  const match = PROVIDER_UNAVAILABLE_PATTERN.exec(output);
+  if (match !== null) {
+    throw new ExecutorInfraError(
+      `${command} unavailable (${match[0]}); the trial never ran against the model`,
+      "provider-unavailable",
+    );
   }
 }
 
