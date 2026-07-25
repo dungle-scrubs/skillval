@@ -334,6 +334,22 @@ There is no legacy `~/.skillval` lookup. State uses `$XDG_STATE_HOME/skillval`, 
 exists, and a `missing`, `invalid`, or `ready` status in JSON output. Invalid case files include a
 validation error. Discovery only requires `SKILL.md`; evaluation requires a valid `skillval.yml`.
 
+## Coverage matrix
+
+`skillval coverage` renders every ready skill's eval coverage as one self-contained HTML page
+(written to `reports/coverage.html` under the state directory and opened, replacing the previous
+render - it is a view of the current suites, not a run artifact). Each case is classified onto a
+grader rung: **trigger-only** (proves the skill loads, says nothing about what it changes),
+**regex** (lexical presence in output), or **execution** (runtime behavior via `command_exit`,
+`json_schema`, or a registered grader; a case with both regex and execution graders counts as
+execution - its strongest evidence). The page shows per-rung totals, a composition bar whose
+segments carry hover tooltips explaining each rung, and a per-root matrix - skills sorted
+weakest-coverage-first - expandable to case-level graders, arms, and trials. Gap stats call out
+skills with zero behavioral cases, skills without a negative trigger case, and how many skills
+compare against a baseline arm. `--json` returns the full coverage report as data instead. This is
+the mechanical half of the bundled skill's audit (its "read what is graded" step); the judgment
+half - what is worth writing next - stays with [the skill](#bundled-skill).
+
 ## Trust model
 
 A `skillval.yml` is executable input, not passive configuration. Two fields run case-authored

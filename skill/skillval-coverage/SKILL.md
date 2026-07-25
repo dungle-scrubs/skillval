@@ -61,12 +61,13 @@ candidate case before anything else.
    [references/decisions.md](references/decisions.md) - do not count section
    headers, prose, or examples as rules). Classify each rule **capability** or
    **preference** (next section).
-3. **Read what is graded.** From the skill's `skillval.yml`, note which rules
-   have a *behavioral* case (an `assert` with `must_match` / `must_not_match` /
-   `command_exit` / `json_schema` / graders), which have only a trigger case,
-   and how many negatives exist - and on which grader-ladder rung each
-   behavioral case sits (a regex-only case for a runtime behavior is itself a
-   gap; see the ladder in the stopping rules).
+3. **Read what is graded.** Run `skillval coverage --json` - it classifies
+   every ready skill's cases onto the grader ladder (trigger-only / regex /
+   execution) and surfaces the gap lists mechanically; `skillval coverage`
+   renders the same data as a browsable matrix. Note which rules have a
+   *behavioral* case, which have only a trigger case, and how many negatives
+   exist - and on which rung each behavioral case sits (a regex-only case for
+   a runtime behavior is itself a gap; see the ladder in the stopping rules).
 4. **Diff and rank.** The gap is rules taught with no behavioral case. Rank by
    decay risk and decision value, **not** by which skills look thin (see the
    ranking rule below).

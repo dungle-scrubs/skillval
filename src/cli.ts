@@ -2,9 +2,13 @@
 
 /** Defines the command-line transport and renders runner and discovery results. */
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Command } from "commander";
-import { loadConfig, resolveConfigPath } from "./config.js";
-import type { DiscoveredInstruction, DiscoveredSkill } from "./discovery.js";
+import { loadConfig, resolveConfigPath, resolveStateDirectory } from "./config.js";
+import { computeCoverage } from "./coverage.js";
+import { renderCoverageReport } from "./coverage-report.js";
+import type { DiscoveredInstruction, DiscoveredSkill, ReadyDiscoveredSkill } from "./discovery.js";
 import {
   discoverProjects,
   discoverSkills,
@@ -186,6 +190,44 @@ program
     }
     for (const root of [...discovery.missingRoots, ...projectDiscovery.missingRoots]) {
       console.log(`missing root: ${root}`);
+    }
+  });
+
+program
+  .command("coverage")
+  .description(
+    "Render an eval-coverage matrix of every ready skill: cases per skill by grader rung (trigger-only, regex, execution)",
+  )
+  .option("--json", "return the coverage report as JSON instead of writing the HTML page")
+  .action((options: ListOptions, command: Command): void => {
+    const globalOptions = command.optsWithGlobals() as GlobalOptions & ListOptions;
+    const configPath = resolveConfigPath({ cliPath: globalOptions.config });
+    const config = loadConfig(configPath);
+    const discovery = discoverSkills(config.roots, config.exclude ?? []);
+    const projectDiscovery = discoverProjects(config.projects ?? [], config.exclude ?? []);
+    const ready = [...discovery.skills, ...projectDiscovery.skills].filter(
+      (skill): skill is ReadyDiscoveredSkill => skill.status === "ready",
+    );
+    const report = computeCoverage(ready);
+    if (options.json === true) {
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+    // A stable filename: coverage is a view of the current suites, not a run artifact keyed by
+    // what executed, so each render replaces the last instead of accumulating.
+    const reportDirectory = join(resolveStateDirectory(), "reports");
+    mkdirSync(reportDirectory, { recursive: true });
+    const htmlPath = join(reportDirectory, "coverage.html");
+    writeFileSync(
+      htmlPath,
+      renderCoverageReport(report, { generatedAt: new Date().toISOString() }),
+    );
+    console.log(`coverage: ${htmlPath}`);
+    openInBrowser(htmlPath);
+    for (const skill of [...discovery.skills, ...projectDiscovery.skills]) {
+      if (skill.status !== "ready") {
+        console.log(`skipped (${skill.status}): ${skill.name}`);
+      }
     }
   });
 
