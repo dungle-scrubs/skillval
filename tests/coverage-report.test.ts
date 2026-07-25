@@ -39,7 +39,9 @@ describe("renderCoverageReport", () => {
     // Both the hover tooltip (data-tip) and the accessible name carry the rung, the share, and
     // what the rung proves - the bar is readable without the legend.
     expect(html).toContain('data-tip="execution - 1 of 2 cases (50%). Runtime behavior');
-    expect(html).toContain('data-tip="trigger-only - 1 of 2 cases (50%). Proves the skill loads');
+    expect(html).toContain(
+      'data-tip="trigger-only - 1 of 2 cases (50%). Proves invocation behavior',
+    );
     expect(html).toMatch(/aria-label="execution - 1 of 2 cases/);
     // Segments are keyboard-reachable so the tooltip is not hover-only.
     expect(html).toContain('tabindex="0"');
@@ -50,6 +52,16 @@ describe("renderCoverageReport", () => {
     expect(html).toContain("typed-errors");
     expect(html).toContain("command_exit");
     expect(html).toContain("solo+baseline");
+    // The rule column carries the audit's unit of account.
+    expect(html).toContain("<th>Rule</th>");
+  });
+
+  it("renders discovery diagnostics and an explicit empty state", () => {
+    const empty = renderCoverageReport(computeCoverage([], ["/roots/gone"]), context);
+    expect(empty).toContain("No ready skills discovered");
+    expect(empty).toContain("missing root");
+    expect(empty).toContain("/roots/gone");
+    expect(empty).not.toContain("every skill");
   });
 
   it("is a self-contained document with no scripts or external assets", () => {

@@ -43,6 +43,9 @@ function skill(name: string, root: string, cases: EvalCase[]): ReadyDiscoveredSk
 describe("caseRung", () => {
   it("classifies by the strongest grader present", () => {
     expect(caseRung(triggerCase("t"))).toBe("trigger");
+    // A case with no grader at all checks only trace completeness - it is evidence of nothing
+    // and must not be presented as trigger coverage.
+    expect(caseRung({ id: "bare", mode: "trigger", prompt: "p" })).toBe("ungraded");
     expect(caseRung(regexCase("r"))).toBe("regex");
     // Execution outranks a regex on the same case.
     expect(caseRung(executionCase("x"))).toBe("execution");
@@ -97,7 +100,7 @@ describe("computeCoverage", () => {
   it("aggregates totals and rung counts", () => {
     expect(report.skillCount).toBe(3);
     expect(report.caseCount).toBe(6);
-    expect(report.counts).toEqual({ execution: 1, regex: 1, trigger: 4 });
+    expect(report.counts).toEqual({ execution: 1, regex: 1, trigger: 4, ungraded: 0 });
   });
 
   it("groups by root and sorts skills weakest-coverage-first", () => {
@@ -107,10 +110,49 @@ describe("computeCoverage", () => {
     expect(alpha?.skills.map((member) => member.name)).toEqual(["weak", "strong"]);
   });
 
-  it("surfaces the gap lists", () => {
-    expect(report.skillsWithoutBehavioralCases).toEqual(["weak"]);
+  it("surfaces the gap lists as unambiguous refs", () => {
+    expect(report.skillsWithoutBehavioralCases).toEqual([{ name: "weak", root: "/roots/alpha" }]);
     // mixed has no should_trigger: false case.
-    expect(report.skillsWithoutNegativeTrigger).toEqual(["mixed"]);
+    expect(report.skillsWithoutNegativeTrigger).toEqual([{ name: "mixed", root: "/roots/beta" }]);
     expect(report.skillsWithBaselineComparison).toBe(2);
+  });
+
+  it("carries discovery diagnostics instead of silently narrowing the universe", () => {
+    const partial = computeCoverage(
+      [
+        skill("ok", "/roots/alpha", [triggerCase("t")]),
+        {
+          caseCount: 0,
+          class: "invalid",
+          hasSkillval: true,
+          name: "broken",
+          root: "/roots/alpha",
+          skillDirectory: "/roots/alpha/broken",
+          status: "invalid",
+          validationError: "bad yaml",
+        },
+      ],
+      ["/roots/gone"],
+    );
+    expect(partial.skillCount).toBe(1);
+    expect(partial.missingRoots).toEqual(["/roots/gone"]);
+    expect(partial.skipped).toEqual([
+      { name: "broken", root: "/roots/alpha", status: "invalid", validationError: "bad yaml" },
+    ]);
+  });
+
+  it("requires both arms for a baseline comparison", () => {
+    const oneArmed = computeCoverage([
+      skill("baseline-only", "/roots/alpha", [
+        {
+          arms: ["baseline"],
+          assert: { must_match: ["x"] },
+          id: "b",
+          mode: "generation",
+          prompt: "p",
+        },
+      ]),
+    ]);
+    expect(oneArmed.skillsWithBaselineComparison).toBe(0);
   });
 });

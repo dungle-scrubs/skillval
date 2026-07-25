@@ -2,13 +2,13 @@
 
 /** Defines the command-line transport and renders runner and discovery results. */
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Command } from "commander";
 import { loadConfig, resolveConfigPath, resolveStateDirectory } from "./config.js";
 import { computeCoverage } from "./coverage.js";
 import { renderCoverageReport } from "./coverage-report.js";
-import type { DiscoveredInstruction, DiscoveredSkill, ReadyDiscoveredSkill } from "./discovery.js";
+import type { DiscoveredInstruction, DiscoveredSkill } from "./discovery.js";
 import {
   discoverProjects,
   discoverSkills,
@@ -205,29 +205,37 @@ program
     const config = loadConfig(configPath);
     const discovery = discoverSkills(config.roots, config.exclude ?? []);
     const projectDiscovery = discoverProjects(config.projects ?? [], config.exclude ?? []);
-    const ready = [...discovery.skills, ...projectDiscovery.skills].filter(
-      (skill): skill is ReadyDiscoveredSkill => skill.status === "ready",
+    // The full discovery result goes in, not just the ready skills: missing roots and skipped
+    // skills belong in the report, or it silently narrows its universe while looking complete.
+    const report = computeCoverage(
+      [...discovery.skills, ...projectDiscovery.skills],
+      [...discovery.missingRoots, ...projectDiscovery.missingRoots],
     );
-    const report = computeCoverage(ready);
     if (options.json === true) {
       console.log(JSON.stringify(report, null, 2));
       return;
     }
     // A stable filename: coverage is a view of the current suites, not a run artifact keyed by
-    // what executed, so each render replaces the last instead of accumulating.
+    // what executed, so each render replaces the last instead of accumulating. Written to a
+    // sibling temp file and renamed so an interruption never leaves the sole report partial.
     const reportDirectory = join(resolveStateDirectory(), "reports");
     mkdirSync(reportDirectory, { recursive: true });
     const htmlPath = join(reportDirectory, "coverage.html");
+    const stagingPath = `${htmlPath}.tmp-${process.pid}`;
     writeFileSync(
-      htmlPath,
+      stagingPath,
       renderCoverageReport(report, { generatedAt: new Date().toISOString() }),
     );
+    renameSync(stagingPath, htmlPath);
     console.log(`coverage: ${htmlPath}`);
     openInBrowser(htmlPath);
-    for (const skill of [...discovery.skills, ...projectDiscovery.skills]) {
-      if (skill.status !== "ready") {
-        console.log(`skipped (${skill.status}): ${skill.name}`);
-      }
+    for (const root of report.missingRoots) console.log(`missing root: ${root}`);
+    for (const skill of report.skipped) {
+      console.log(
+        `skipped (${skill.status}): ${skill.name}${
+          skill.validationError === undefined ? "" : ` - ${skill.validationError}`
+        }`,
+      );
     }
   });
 

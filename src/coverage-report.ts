@@ -1,19 +1,28 @@
 /** Renders the eval-coverage matrix as one self-contained HTML page, matching the run report's design. */
-import type { CaseCoverage, CoverageReport, GraderRung, SkillCoverage } from "./coverage.js";
+import type {
+  CaseCoverage,
+  CoverageReport,
+  GraderRung,
+  SkillCoverage,
+  SkillRef,
+} from "./coverage.js";
 import { RUNG_ORDER } from "./coverage.js";
 import { escapeHtml } from "./html-report.js";
 
 // What each rung proves, worded for the segment tooltips and the legend. The ladder comes from the
-// skillval-coverage skill: presence -> lexical output -> runtime behavior.
+// skillval-coverage skill: invocation -> lexical output -> runtime behavior.
 const RUNG_LABEL: Record<GraderRung, string> = {
   execution: "execution",
   regex: "regex",
   trigger: "trigger-only",
+  ungraded: "ungraded",
 };
 const RUNG_MEANING: Record<GraderRung, string> = {
   execution: "Runtime behavior, proven by command_exit / json_schema / tsc.",
   regex: "Lexical presence in the output; a comment can satisfy it.",
-  trigger: "Proves the skill loads when it should; says nothing about what it changes.",
+  trigger:
+    "Proves invocation behavior - the skill fires (or stays quiet) when it should; says nothing about what it changes.",
+  ungraded: "No grader at all - only trace completeness is checked. Not evidence of anything.",
 };
 
 export interface CoverageReportContext {
@@ -27,7 +36,6 @@ export function renderCoverageReport(
   const behavioral = report.counts.regex + report.counts.execution;
   const behavioralShare =
     report.caseCount === 0 ? 0 : Math.round((100 * behavioral) / report.caseCount);
-  const missingBehavioral = report.skillsWithoutBehavioralCases;
 
   return `<!doctype html>
 <html lang="en">
@@ -47,7 +55,51 @@ export function renderCoverageReport(
   </p>
 </header>
 
-<div class="tiles">
+${renderNotices(report)}
+${report.skillCount === 0 ? renderEmptyState() : renderBody(report, behavioralShare)}
+
+<footer class="page-foot">
+  <p>Within each group, skills sort weakest-coverage-first (behavioral share, then suite size).
+  The t / r / x column is the per-rung case count. Expand a skill for its case-level graders.
+  Source of truth: each skill's <code>skillval.yml</code>.</p>
+</footer>
+</body>
+</html>
+`;
+}
+
+// Discovery diagnostics stay on the page: a report over a silently narrowed universe would read as
+// authoritative coverage of everything.
+function renderNotices(report: CoverageReport): string {
+  if (report.missingRoots.length === 0 && report.skipped.length === 0) return "";
+  const roots = report.missingRoots.map(
+    (root) => `<li>missing root: <code>${escapeHtml(root)}</code></li>`,
+  );
+  const skipped = report.skipped.map(
+    (skill) =>
+      `<li>skipped (${skill.status}): <code>${escapeHtml(skill.name)}</code>${
+        skill.validationError === undefined ? "" : ` - ${escapeHtml(skill.validationError)}`
+      }</li>`,
+  );
+  return `<section class="notices">
+  <h2>Not covered by this report</h2>
+  <ul>
+${[...roots, ...skipped].join("\n")}
+  </ul>
+</section>`;
+}
+
+function renderEmptyState(): string {
+  return `<section class="overall">
+  <h2>No ready skills discovered</h2>
+  <p class="note">Nothing is evaluatable under the configured roots: a skill needs a
+  <code>SKILL.md</code> and a valid <code>skillval.yml</code> beside it. Check the configuration
+  and the notices above.</p>
+</section>`;
+}
+
+function renderBody(report: CoverageReport, behavioralShare: number): string {
+  return `<div class="tiles">
   <div class="tile"><b>${report.skillCount}</b><span>ready skills</span></div>
   <div class="tile"><b>${report.caseCount}</b><span>eval cases</span></div>
   <div class="tile t-trigger"><b>${report.counts.trigger}</b><span>trigger-only cases</span></div>
@@ -60,36 +112,30 @@ export function renderCoverageReport(
   <h2>All ${report.caseCount} cases by grader rung</h2>
   ${compositionBar(report.counts, report.caseCount)}
   <div class="legend">
-    <span class="l-trigger"><i></i>trigger-only (${report.counts.trigger}) - ${escapeHtml(RUNG_MEANING.trigger)}</span>
-    <span class="l-regex"><i></i>regex (${report.counts.regex}) - ${escapeHtml(RUNG_MEANING.regex)}</span>
-    <span class="l-execution"><i></i>execution (${report.counts.execution}) - ${escapeHtml(RUNG_MEANING.execution)}</span>
+    ${RUNG_ORDER.filter((rung) => rung !== "ungraded" || report.counts.ungraded > 0)
+      .map(
+        (rung) =>
+          `<span class="l-${rung}"><i></i>${RUNG_LABEL[rung]} (${report.counts[rung]}) - ${escapeHtml(RUNG_MEANING[rung])}</span>`,
+      )
+      .join("\n    ")}
   </div>
   <p class="note">
     ${report.skillsWithBaselineComparison} of ${report.skillCount} skills compare against a baseline arm
     on at least one behavioral case &middot;
-    ${
-      report.skillsWithoutNegativeTrigger.length === 0
-        ? "every skill ships at least one negative trigger case (no thin boundaries)"
-        : `${report.skillsWithoutNegativeTrigger.length} skill(s) without a negative trigger case: ${report.skillsWithoutNegativeTrigger.map((name) => `<code>${escapeHtml(name)}</code>`).join(", ")}`
-    } &middot;
-    ${
-      missingBehavioral.length === 0
-        ? "every skill has at least one behavioral case"
-        : `${missingBehavioral.length} skill(s) with zero behavioral cases: ${missingBehavioral.map((name) => `<code>${escapeHtml(name)}</code>`).join(", ")}`
-    }
+    ${gapSentence(report.skillsWithoutNegativeTrigger, "without a negative trigger case", "every skill ships at least one negative trigger case (no thin boundaries)")} &middot;
+    ${gapSentence(report.skillsWithoutBehavioralCases, "with zero behavioral cases", "every skill has at least one behavioral case")}
   </p>
 </section>
 
-${report.groups.map(renderGroup).join("\n")}
+${report.groups.map(renderGroup).join("\n")}`;
+}
 
-<footer class="page-foot">
-  <p>Within each group, skills sort weakest-coverage-first (behavioral share, then suite size).
-  The t / r / x column is the per-rung case count. Expand a skill for its case-level graders.
-  Source of truth: each skill's <code>skillval.yml</code>.</p>
-</footer>
-</body>
-</html>
-`;
+function gapSentence(refs: readonly SkillRef[], label: string, none: string): string {
+  if (refs.length === 0) return none;
+  const names = refs
+    .map((ref) => `<code title="${escapeHtml(ref.root)}">${escapeHtml(ref.name)}</code>`)
+    .join(", ");
+  return `${refs.length} skill(s) ${label}: ${names}`;
 }
 
 function renderGroup(group: {
@@ -109,19 +155,22 @@ ${group.skills.map(renderSkill).join("\n")}
 function renderSkill(skill: SkillCoverage): string {
   const total = skill.cases.length;
   const share = total === 0 ? 0 : Math.round((100 * skill.behavioral) / total);
+  const mix = `${skill.counts.trigger} / ${skill.counts.regex} / ${skill.counts.execution}${
+    skill.counts.ungraded > 0 ? ` (+${skill.counts.ungraded}u)` : ""
+  }`;
   return `<details class="skill">
 <summary>
   <span class="s-name"><code>${escapeHtml(skill.name)}</code></span>
   <span class="s-class">${skill.class}</span>
   <span class="s-count">${total}</span>
   ${compositionBar(skill.counts, total)}
-  <span class="s-mix">${skill.counts.trigger} / ${skill.counts.regex} / ${skill.counts.execution}</span>
+  <span class="s-mix">${mix}</span>
   <span class="s-beh">${share}%</span>
 </summary>
 <div class="detail">
 <div class="table-scroll">
 <table>
-<thead><tr><th>Case</th><th>Mode</th><th>Type</th><th>Graders</th><th>Arms</th><th class="num">Trials</th></tr></thead>
+<thead><tr><th>Case</th><th>Rule</th><th>Mode</th><th>Type</th><th>Graders</th><th>Arms</th><th class="num">Trials</th></tr></thead>
 <tbody>
 ${skill.cases.map(renderCase).join("\n")}
 </tbody>
@@ -134,16 +183,17 @@ ${skill.cases.map(renderCase).join("\n")}
 function renderCase(item: CaseCoverage): string {
   const chips =
     item.graders.length === 0
-      ? '<span class="chip chip-trigger">trigger only</span>'
+      ? '<span class="chip chip-ungraded">no graders</span>'
       : item.graders
           .map((label) => `<span class="chip chip-${chipRung(label)}">${escapeHtml(label)}</span>`)
           .join("");
   return `<tr>
   <td><code>${escapeHtml(item.id)}</code></td>
+  <td>${item.rule === undefined ? "-" : `<code>${escapeHtml(item.rule)}</code>`}</td>
   <td>${item.mode}</td>
   <td>${item.type ?? "-"}</td>
   <td class="chips-cell">${chips}</td>
-  <td>${item.baseline ? "solo+baseline" : "solo"}</td>
+  <td>${item.arms.length === 0 ? "(none)" : item.arms.map((arm) => escapeHtml(arm)).join("+")}</td>
   <td class="num">${item.trials}</td>
 </tr>`;
 }
@@ -172,11 +222,12 @@ const STYLES = `
 :root {
   --bg: #fbfaf8; --surface: #fff; --line: #e6e2dc; --ink: #1c1b19; --muted: #6b6660;
   --accent: #7c4dff; --r-trigger: #b45309; --r-regex: #7c4dff; --r-execution: #1f8a52;
+  --r-ungraded: #8a857c;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #14130f; --surface: #1c1b17; --line: #2e2c26; --ink: #f2efe9; --muted: #a09a91;
-    --r-trigger: #cf7228; --r-regex: #9a75ff; --r-execution: #37a066; }
+    --r-trigger: #cf7228; --r-regex: #9a75ff; --r-execution: #37a066; --r-ungraded: #7d786f; }
 }
 * { box-sizing: border-box; }
 body { margin: 0 auto; padding: 2.5rem 1.25rem 4rem; max-width: 72rem; background: var(--bg);
@@ -186,6 +237,10 @@ body { margin: 0 auto; padding: 2.5rem 1.25rem 4rem; max-width: 72rem; backgroun
   color: var(--accent); font-weight: 600; }
 h1 { font-size: 1.7rem; margin: .3rem 0 .35rem; letter-spacing: -.02em; text-wrap: balance; }
 .meta { color: var(--muted); font-size: .86rem; margin: 0; }
+.notices { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--r-trigger);
+  border-radius: .55rem; padding: .85rem 1rem; margin-bottom: 1.2rem; }
+.notices h2 { margin: 0 0 .4rem; font-size: .95rem; }
+.notices ul { margin: 0; padding-left: 1.1rem; font-size: .85rem; color: var(--muted); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .7rem;
   margin: 1.4rem 0; }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: .55rem;
@@ -208,9 +263,11 @@ h1 { font-size: 1.7rem; margin: .3rem 0 .35rem; letter-spacing: -.02em; text-wra
 .seg-trigger { background: var(--r-trigger); }
 .seg-regex { background: var(--r-regex); }
 .seg-execution { background: var(--r-execution); }
+.seg-ungraded { background: var(--r-ungraded); }
 .seg:hover::after, .seg:focus-visible::after {
   content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%;
-  transform: translateX(-50%); z-index: 6; width: max-content; max-width: 17rem;
+  transform: translateX(-50%); z-index: 6; width: max-content;
+  max-width: min(17rem, calc(100vw - 2.5rem));
   background: var(--ink); color: var(--bg); font-size: .78rem; line-height: 1.4;
   padding: .45rem .6rem; border-radius: .4rem; white-space: normal; pointer-events: none;
   box-shadow: 0 2px 10px rgba(0, 0, 0, .25); }
@@ -219,8 +276,7 @@ h1 { font-size: 1.7rem; margin: .3rem 0 .35rem; letter-spacing: -.02em; text-wra
   transform: translateX(-50%); z-index: 6; border: 5px solid transparent;
   border-top-color: var(--ink); border-bottom: 0; pointer-events: none; }
 .seg:first-child::after { left: 0; transform: none; }
-.seg:last-child::after { left: auto; right: 0; transform: none; }
-.seg:only-child::after { left: 0; right: auto; transform: none; }
+.seg:last-child::after, .seg:only-child::after { left: auto; right: 0; transform: none; }
 .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .overall .bar { height: 20px; }
 .legend { display: flex; gap: 1.1rem; flex-wrap: wrap; margin-top: .6rem; font-size: .83rem;
@@ -230,6 +286,7 @@ h1 { font-size: 1.7rem; margin: .3rem 0 .35rem; letter-spacing: -.02em; text-wra
 .legend .l-trigger i { background: var(--r-trigger); }
 .legend .l-regex i { background: var(--r-regex); }
 .legend .l-execution i { background: var(--r-execution); }
+.legend .l-ungraded i { background: var(--r-ungraded); }
 .note { color: var(--muted); font-size: .85rem; margin: .55rem 0 0; }
 .group { margin-bottom: 1.9rem; }
 .group h2 { font-size: 1.08rem; margin: 0 0 .1rem; }
@@ -267,6 +324,7 @@ code { font-family: var(--mono); font-size: .92em; }
 .chip-trigger { color: var(--r-trigger); }
 .chip-regex { color: var(--r-regex); }
 .chip-execution { color: var(--r-execution); }
+.chip-ungraded { color: var(--muted); }
 .chips-cell { min-width: 14rem; }
 .page-foot { color: var(--muted); font-size: .82rem; border-top: 1px solid var(--line);
   padding-top: 1rem; margin-top: 2rem; }
@@ -274,5 +332,8 @@ code { font-family: var(--mono); font-size: .92em; }
   .col-head, summary { grid-template-columns: 1fr 3rem minmax(6rem, 1fr); }
   .s-class, .s-mix, .s-beh { display: none; }
   .col-head span:nth-child(2), .col-head span:nth-child(5), .col-head span:nth-child(6) { display: none; }
+  /* The bar sits in the rightmost column on small screens; right-anchoring keeps every tooltip
+     inside the viewport. */
+  .seg::after, .seg:first-child::after { left: auto; right: 0; transform: none; }
 }
 `;

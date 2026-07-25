@@ -1,17 +1,19 @@
 /** Computes eval-coverage statistics across discovered skills: cases classified by grader rung. */
 import { basename } from "node:path";
-import type { ReadyDiscoveredSkill } from "./discovery.js";
+import type { DiscoveredSkill, ReadyDiscoveredSkill } from "./discovery.js";
 import type { EvalCase } from "./types.js";
 
-// The grader ladder (see the skillval-coverage skill): a trigger-only case proves the skill loads,
-// a regex case proves lexical presence in output, an execution case proves runtime behavior. A case
-// with both regex and execution graders sits on the execution rung - its strongest evidence.
-export type GraderRung = "execution" | "regex" | "trigger";
+// The grader ladder (see the skillval-coverage skill): a trigger case proves invocation behavior
+// (fires, or stays quiet, when it should), a regex case proves lexical presence in output, an
+// execution case proves runtime behavior. A case with both regex and execution graders sits on the
+// execution rung - its strongest evidence. A case with no grader at all (the contract permits it)
+// is "ungraded": it checks only trace completeness and must not be presented as evidence.
+export type GraderRung = "execution" | "regex" | "trigger" | "ungraded";
 
-export const RUNG_ORDER: readonly GraderRung[] = ["trigger", "regex", "execution"];
+export const RUNG_ORDER: readonly GraderRung[] = ["ungraded", "trigger", "regex", "execution"];
 
 export interface CaseCoverage {
-  readonly baseline: boolean;
+  readonly arms: readonly string[];
   readonly graders: readonly string[];
   readonly id: string;
   readonly mode: "generation" | "trigger";
@@ -40,14 +42,30 @@ export interface CoverageGroup {
   readonly skills: readonly SkillCoverage[];
 }
 
+// A discovered-but-unevaluatable skill, carried so the report never silently narrows its universe.
+export interface SkippedSkill {
+  readonly name: string;
+  readonly root: string;
+  readonly status: "invalid" | "missing";
+  readonly validationError: string | undefined;
+}
+
+// A skill identified unambiguously: discovery permits the same name under two roots.
+export interface SkillRef {
+  readonly name: string;
+  readonly root: string;
+}
+
 export interface CoverageReport {
   readonly caseCount: number;
   readonly counts: Readonly<Record<GraderRung, number>>;
   readonly groups: readonly CoverageGroup[];
+  readonly missingRoots: readonly string[];
   readonly skillCount: number;
   readonly skillsWithBaselineComparison: number;
-  readonly skillsWithoutBehavioralCases: readonly string[];
-  readonly skillsWithoutNegativeTrigger: readonly string[];
+  readonly skillsWithoutBehavioralCases: readonly SkillRef[];
+  readonly skillsWithoutNegativeTrigger: readonly SkillRef[];
+  readonly skipped: readonly SkippedSkill[];
 }
 
 export function caseRung(evalCase: EvalCase): GraderRung {
@@ -62,7 +80,7 @@ export function caseRung(evalCase: EvalCase): GraderRung {
   if ((assert?.must_match?.length ?? 0) > 0 || (assert?.must_not_match?.length ?? 0) > 0) {
     return "regex";
   }
-  return "trigger";
+  return evalCase.should_trigger === undefined ? "ungraded" : "trigger";
 }
 
 // Human-readable grader labels for one case, in ladder order (weakest first).
@@ -85,10 +103,11 @@ export function caseGraderLabels(evalCase: EvalCase): readonly string[] {
 }
 
 function skillCoverage(skill: ReadyDiscoveredSkill): SkillCoverage {
-  const cases = skill.evals.cases.map((evalCase): CaseCoverage => {
-    const arms = evalCase.arms ?? ["solo"];
-    return {
-      baseline: arms.includes("baseline"),
+  const cases = skill.evals.cases.map(
+    (evalCase): CaseCoverage => ({
+      // The actual declared arms: the contract also accepts [] and [baseline], and the report must
+      // not dress those up as the documented solo/solo+baseline shapes.
+      arms: evalCase.arms ?? ["solo"],
       graders: caseGraderLabels(evalCase),
       id: evalCase.id,
       mode: evalCase.mode,
@@ -96,24 +115,43 @@ function skillCoverage(skill: ReadyDiscoveredSkill): SkillCoverage {
       rung: caseRung(evalCase),
       trials: evalCase.trials ?? 1,
       type: evalCase.type,
-    };
-  });
-  const counts = { execution: 0, regex: 0, trigger: 0 };
+    }),
+  );
+  const counts = { execution: 0, regex: 0, trigger: 0, ungraded: 0 };
   for (const item of cases) counts[item.rung] += 1;
   return {
     behavioral: counts.regex + counts.execution,
     cases,
     class: skill.evals.class,
     counts,
-    hasBaselineComparison: cases.some((item) => item.baseline && item.rung !== "trigger"),
+    // A comparison needs both arms: a baseline-only case has no with-skill side to compare.
+    hasBaselineComparison: cases.some(
+      (item) =>
+        item.arms.includes("baseline") && item.arms.includes("solo") && item.rung !== "trigger",
+    ),
     hasNegativeTrigger: skill.evals.cases.some((evalCase) => evalCase.should_trigger === false),
     name: skill.name,
     root: skill.root,
   };
 }
 
-export function computeCoverage(skills: readonly ReadyDiscoveredSkill[]): CoverageReport {
-  const all = skills.map(skillCoverage);
+export function computeCoverage(
+  skills: readonly DiscoveredSkill[],
+  missingRoots: readonly string[] = [],
+): CoverageReport {
+  const ready = skills.filter((skill): skill is ReadyDiscoveredSkill => skill.status === "ready");
+  const skipped = skills
+    .filter((skill) => skill.status !== "ready")
+    .map(
+      (skill): SkippedSkill => ({
+        name: skill.name,
+        root: skill.root,
+        status: skill.status,
+        validationError: skill.validationError,
+      }),
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const all = ready.map(skillCoverage);
   const byRoot = new Map<string, SkillCoverage[]>();
   for (const skill of all) {
     const members = byRoot.get(skill.root) ?? [];
@@ -138,25 +176,31 @@ export function computeCoverage(skills: readonly ReadyDiscoveredSkill[]): Covera
         }),
       }),
     );
-  const counts = { execution: 0, regex: 0, trigger: 0 };
+  const counts = { execution: 0, regex: 0, trigger: 0, ungraded: 0 };
   for (const skill of all) {
     counts.execution += skill.counts.execution;
     counts.regex += skill.counts.regex;
     counts.trigger += skill.counts.trigger;
+    counts.ungraded += skill.counts.ungraded;
   }
+  const ref = (skill: SkillCoverage): SkillRef => ({ name: skill.name, root: skill.root });
+  const byRef = (left: SkillRef, right: SkillRef): number =>
+    left.name.localeCompare(right.name) || left.root.localeCompare(right.root);
   return {
     caseCount: all.reduce((sum, skill) => sum + skill.cases.length, 0),
     counts,
     groups,
+    missingRoots: [...missingRoots].sort(),
     skillCount: all.length,
     skillsWithBaselineComparison: all.filter((skill) => skill.hasBaselineComparison).length,
     skillsWithoutBehavioralCases: all
       .filter((skill) => skill.behavioral === 0)
-      .map((skill) => skill.name)
-      .sort(),
+      .map(ref)
+      .sort(byRef),
     skillsWithoutNegativeTrigger: all
       .filter((skill) => !skill.hasNegativeTrigger)
-      .map((skill) => skill.name)
-      .sort(),
+      .map(ref)
+      .sort(byRef),
+    skipped,
   };
 }
