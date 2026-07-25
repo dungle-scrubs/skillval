@@ -9,7 +9,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
+import { Lang, parse } from "@ast-grep/napi";
 import type { AnySchema, ValidateFunction } from "ajv/dist/2020.js";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { Static } from "typebox";
@@ -65,8 +66,47 @@ export type CommandExitGraderConfig = Static<typeof commandExitGraderSchema>;
 // The command_exit grader supports only generation cases, mirroring the produced-file graders.
 export const COMMAND_EXIT_GRADER_MODES: readonly CaseMode[] = ["generation"];
 
+// The ast grader decides STRUCTURAL facts about a produced file - where code sits and what it
+// references - that regex cannot see and black-box execution cannot always separate (the
+// validation-assert vs invariant-assert lookalike). Each entry is an ast-grep rule object
+// (pattern / kind / regex / inside / has / all / any / not), evaluated against the parsed file:
+// every must_match rule needs at least one match; any must_not_match match fails with the
+// offending line. Pure parsing on the grading machine - no shell, so no --allow-shell gate.
+export const astGraderSchema = Type.ReadonlyObject(
+  Type.Object({
+    file: Type.String({
+      description: "Produced file, relative to the workspace, parsed for structural matching.",
+      minLength: 1,
+      pattern: String.raw`\S`,
+    }),
+    must_match: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Record(Type.String(), Type.Unknown()), {
+          description: "ast-grep rule objects that must each match at least once.",
+          minItems: 1,
+        }),
+      ),
+    ),
+    must_not_match: Type.Optional(
+      Type.Readonly(
+        Type.Array(Type.Record(Type.String(), Type.Unknown()), {
+          description: "ast-grep rule objects that must match nowhere.",
+          minItems: 1,
+        }),
+      ),
+    ),
+  }),
+  { additionalProperties: false },
+);
+
+export type AstGraderConfig = Static<typeof astGraderSchema>;
+
+// The ast grader supports only generation cases, mirroring the produced-file graders.
+export const AST_GRADER_MODES: readonly CaseMode[] = ["generation"];
+
 interface GradableCase {
   readonly assert?: {
+    readonly ast?: AstGraderConfig;
     readonly command_exit?: CommandExitGraderConfig;
     readonly graders?: readonly GraderName[];
     readonly json_schema?: JsonSchemaGraderConfig;
@@ -104,9 +144,12 @@ export function graderSupportsMode(name: GraderName, mode: CaseMode): boolean {
 
 export function runGraders(evalCase: GradableCase, workspace: string): readonly GraderCheck[] {
   const checks: GraderCheck[] = [];
-  // Graders run least-mutating first: json_schema only reads, command_exit may write, and gradeTsc
-  // injects package.json/tsconfig.json. Reading produced files before any grader can rewrite them
-  // keeps a combined case deterministic.
+  // Graders run least-mutating first: ast and json_schema only read, command_exit may write, and
+  // gradeTsc injects package.json/tsconfig.json. Reading produced files before any grader can
+  // rewrite them keeps a combined case deterministic.
+  if (evalCase.assert?.ast !== undefined) {
+    checks.push(gradeAst(workspace, evalCase.assert.ast));
+  }
   if (evalCase.assert?.json_schema !== undefined) {
     checks.push(gradeJsonSchema(workspace, evalCase.assert.json_schema));
   }
@@ -251,6 +294,147 @@ function gradeJsonSchema(workspace: string, config: JsonSchemaGraderConfig): Gra
     detail: `${config.file} ${location} ${first?.message ?? "does not match schema"}`,
     name: "json_schema",
     pass: false,
+  };
+}
+
+// Languages the ast grader parses, by produced-file extension - aligned with ast-grep's own
+// extension table (jsx belongs to the JavaScript grammar, which parses JSX; tsx has its own).
+// An unsupported extension is a clean failure at case-load time, never a crash.
+const AST_LANGUAGES: Readonly<Record<string, Lang>> = {
+  ".cjs": Lang.JavaScript,
+  ".css": Lang.Css,
+  ".cts": Lang.TypeScript,
+  ".htm": Lang.Html,
+  ".html": Lang.Html,
+  ".js": Lang.JavaScript,
+  ".jsx": Lang.JavaScript,
+  ".mjs": Lang.JavaScript,
+  ".mts": Lang.TypeScript,
+  ".ts": Lang.TypeScript,
+  ".tsx": Lang.Tsx,
+  ".xhtml": Lang.Html,
+};
+
+// Inference reads the AUTHORED file path, so what the case says is what gets parsed - the
+// realpath target is used only for containment and reading.
+export function astLanguageFor(file: string): Lang | undefined {
+  return AST_LANGUAGES[extname(file).toLowerCase()];
+}
+
+// Case parsing calls this so an unusable rule is a case-authoring error surfaced before any paid
+// trial, mirroring jsonSchemaCompileError. ast-grep validates rule structure eagerly, so probing
+// a one-character source exercises the full rule compiler.
+export function astRuleError(file: string, rule: Record<string, unknown>): string | null {
+  const language = astLanguageFor(file);
+  if (language === undefined) {
+    return `unsupported file extension for ast grading: ${file}`;
+  }
+  try {
+    parse(language, "x")
+      .root()
+      .find({ rule } as never);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+// Beyond this size, parsing and matching stop being cheap deterministic checks; produced files a
+// case should grade structurally are orders of magnitude smaller.
+const AST_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+function gradeAst(workspace: string, config: AstGraderConfig): GraderCheck {
+  const workspaceRoot = safeRealpath(resolve(workspace));
+  if (workspaceRoot === null) {
+    return { detail: "workspace not found", name: "ast", pass: false };
+  }
+  // Same containment discipline as json_schema: realpath resolves symlinks so a link pointing
+  // outside the workspace is rejected rather than silently followed.
+  const target = safeRealpath(resolve(workspaceRoot, config.file));
+  if (target === null) {
+    return { detail: `file not found: ${config.file}`, name: "ast", pass: false };
+  }
+  if (target !== workspaceRoot && !target.startsWith(workspaceRoot + sep)) {
+    return { detail: `file escapes workspace: ${config.file}`, name: "ast", pass: false };
+  }
+  const stats = safeLstat(target);
+  if (stats === null || !stats.isFile()) {
+    return { detail: `not a regular file: ${config.file}`, name: "ast", pass: false };
+  }
+  if (stats.size > AST_MAX_FILE_BYTES) {
+    return {
+      detail: `file too large for ast grading (${stats.size} bytes > ${AST_MAX_FILE_BYTES}): ${config.file}`,
+      name: "ast",
+      pass: false,
+    };
+  }
+  const language = astLanguageFor(config.file);
+  if (language === undefined) {
+    return {
+      detail: `unsupported file extension for ast grading: ${config.file}`,
+      name: "ast",
+      pass: false,
+    };
+  }
+  const source = readFileSync(target, "utf8");
+  let root: ReturnType<ReturnType<typeof parse>["root"]>;
+  try {
+    root = parse(language, source).root();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { detail: `failed to parse ${config.file}: ${message}`, name: "ast", pass: false };
+  }
+  const find = (rule: Record<string, unknown>, label: string) => {
+    try {
+      return root.find({ rule } as never);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`invalid ast rule (${label}): ${message}`);
+    }
+  };
+  try {
+    // tree-sitter recovers from syntax errors instead of throwing, leaving ERROR nodes in the
+    // tree. A tree with errors must fail: a forbidden-only case would otherwise pass against
+    // garbage simply because the prohibited structure did not survive parsing. (Limitation:
+    // recovery can also INSERT missing nodes without an ERROR node; structural grading assumes
+    // parseable output, and pairing with tsc closes the remainder for TypeScript.)
+    const parseError = find({ kind: "ERROR" }, "syntax check");
+    if (parseError !== null) {
+      const line = parseError.range().start.line + 1;
+      return {
+        detail: `${config.file} does not parse (syntax error at line ${line}); structural rules were not evaluated`,
+        name: "ast",
+        pass: false,
+      };
+    }
+    for (const [index, rule] of (config.must_match ?? []).entries()) {
+      if (find(rule, `must_match[${index}]`) === null) {
+        return {
+          detail: `ast must_match[${index}] matched nothing: ${JSON.stringify(rule).slice(0, 200)}`,
+          name: "ast",
+          pass: false,
+        };
+      }
+    }
+    for (const [index, rule] of (config.must_not_match ?? []).entries()) {
+      const first = find(rule, `must_not_match[${index}]`);
+      if (first !== null) {
+        const line = first.range().start.line + 1;
+        return {
+          detail: `ast must_not_match[${index}] matched at ${config.file}:${line}: ${first.text().slice(0, 120)}`,
+          name: "ast",
+          pass: false,
+        };
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { detail: message, name: "ast", pass: false };
+  }
+  return {
+    detail: `${config.file} satisfies ${(config.must_match?.length ?? 0) + (config.must_not_match?.length ?? 0)} structural rule(s)`,
+    name: "ast",
+    pass: true,
   };
 }
 

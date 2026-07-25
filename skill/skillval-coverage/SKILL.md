@@ -167,8 +167,12 @@ would make about it. Concretely:
   its own tier for exactly that reason.)
   1. **Regex measures presence** - a token appeared somewhere (a `debugInfo`
      name, the word "correlation", `class \w*Error`). A comment satisfies it.
-  2. **Execution measures behavior** - `command_exit` runs a grading script
-     against the produced artifact and asserts what the code *does*: the
+  2. **Execution measures behavior or structure** - `command_exit` runs a
+     grading script against the produced artifact and asserts what the code
+     *does* (and `assert.ast` matches what shape the code actually *has* -
+     placement facts like a `this.`-referencing guard outside the
+     constructor, which separates an internal invariant from input
+     validation deterministically): the
      rejection is a typed subclass with the original `cause` preserved on the
      chain, the debug snapshot truthfully reflects live state and changes
      across a release, two boundary records share a per-call correlation id.
@@ -184,10 +188,10 @@ would make about it. Concretely:
      ships with red/green validation - a known-good artifact that exits 0 and
      a known-bad one that exits nonzero.
   3. **Judgment stays out of reach** - is it good, appropriate, complete, or
-     distinguishable from a *lookalike the same execution also satisfies*: an
-     `assert` that is input validation rather than an internal invariant, a
-     span that is technically emitted but attribute-poor. **The tell:** you can
-     name a lookalike that passes the strongest script you can write. That is
+     distinguishable from a *lookalike the same execution also satisfies*: a
+     span that is technically emitted but attribute-poor, an error message
+     that is present but unhelpful. **The tell:** you can name a lookalike
+     that passes the strongest script or structural rule you can write. That is
      the model judge's territory (roadmap); leave the dimension explicitly
      flagged rather than faked - do not force a regex or a script across it.
 

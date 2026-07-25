@@ -353,9 +353,10 @@ validation error. Discovery only requires `SKILL.md`; evaluation requires a vali
 (written to `reports/coverage.html` under the state directory and opened, replacing the previous
 render - it is a view of the current suites, not a run artifact). Each case is classified onto a
 grader rung: **trigger-only** (proves the skill loads, says nothing about what it changes),
-**regex** (lexical presence in output), or **execution** (runtime behavior via `command_exit`,
-`json_schema`, or a registered grader; a case with both regex and execution graders counts as
-execution - its strongest evidence). The page shows per-rung totals, a composition bar whose
+**regex** (lexical presence in output), or **execution** (deterministic proof of the artifact
+beyond lexical matching - runtime behavior via `command_exit`, validation via `json_schema` or a
+registered grader, or structural `ast` rules; a case with several graders counts on its strongest
+evidence). The page shows per-rung totals, a composition bar whose
 segments carry hover tooltips explaining each rung, and a per-root matrix - skills sorted
 weakest-coverage-first - expandable to case-level graders, arms, and trials. Gap stats call out
 skills with zero behavioral cases, skills without a negative trigger case, and how many skills
@@ -438,6 +439,16 @@ Case fields:
   JSON; a schema mismatch reports the failing instance path. Omit `$schema` or set it to 2020-12;
   other declared dialects, an escaping `file` path, or a schema that does not compile are validation
   errors.
+- `assert.ast`: parses a produced file (TypeScript, TSX, JavaScript, CSS, HTML by extension) and
+  grades its STRUCTURE with [ast-grep](https://ast-grep.github.io/) rule objects: every
+  `must_match` rule needs at least one match, any `must_not_match` match fails with the offending
+  line. This decides placement facts regex cannot see and execution cannot always separate - the
+  canonical case is the validation-vs-invariant lookalike, where an `assert(param > 0)` in a
+  constructor is input validation but a `this.`-referencing guard in an operation is an internal
+  invariant. Structural matching also cannot be satisfied by a comment. Pure parsing on the
+  grading machine - no shell runs, so `--allow-shell` is not required. In the coverage matrix an
+  ast case counts on the execution rung: deterministic proof of the artifact beyond lexical
+  presence.
 - `assert.command_exit`: runs a shell command in the workspace and passes when it exits with the
   expected code, for generation cases. Takes `command` and optional `expect` (default `0`). The
   command is case-authored arbitrary shell, the same trust level as fixture `setup`, and is off by

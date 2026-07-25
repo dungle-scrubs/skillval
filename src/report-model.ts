@@ -204,7 +204,8 @@ export const RUNG_LABEL: Readonly<Record<string, string>> = {
 };
 
 export const RUNG_MEANING: Readonly<Record<string, string>> = {
-  execution: "Runtime behavior, proven by command_exit / json_schema / tsc.",
+  execution:
+    "Deterministic proof of the artifact beyond lexical matching: runtime behavior via command_exit, schema or compile validation, or structural ast rules.",
   regex: "Lexical presence in the output; a comment can satisfy it.",
   trigger:
     "Proves invocation behavior - the skill fires (or stays quiet) when it should; says nothing about what it changes.",

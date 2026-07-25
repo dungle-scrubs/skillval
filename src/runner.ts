@@ -882,6 +882,7 @@ function hasPeerGradedAssertion(evalCase: EvalCase): boolean {
     (assert.must_match?.length ?? 0) > 0 ||
     (assert.must_not_match?.length ?? 0) > 0 ||
     (assert.graders?.length ?? 0) > 0 ||
+    assert.ast !== undefined ||
     assert.json_schema !== undefined ||
     assert.command_exit !== undefined
   );
