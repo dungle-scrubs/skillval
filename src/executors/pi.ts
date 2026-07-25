@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
+import { spawnAgent } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -14,8 +15,6 @@ import {
   type SeededSkill,
   type TrialRequest,
 } from "./types.js";
-
-const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
 // pi normalizes thinking across every model via pi-ai, from `pi --thinking`.
 export const PI_EFFORT_LEVELS: readonly string[] = [
@@ -117,9 +116,8 @@ export class PiExecutor implements Executor {
       HOME: request.home,
       PI_CODING_AGENT_DIR: prepareCleanPiHome(request.home),
     };
-    const result = spawnSync(
-      "pi",
-      [
+    const result = spawnAgent({
+      args: [
         "-p",
         "--mode",
         "json",
@@ -129,22 +127,17 @@ export class PiExecutor implements Executor {
         ...tools,
         request.evalCase.prompt,
       ],
-      {
-        cwd: request.workspace,
-        encoding: "utf8",
-        env: environment,
-        // Close pi's stdin (empty input -> immediate EOF). pi's -p mode blocks reading stdin when
-        // it is an open non-TTY pipe, which under spawnSync hangs the trial until the timeout kills
-        // it (SIGTERM). Equivalent to running `pi -p ... </dev/null`.
-        input: "",
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: TRIAL_TIMEOUT_MS,
-      },
-    );
+      // pi -p blocks on an open non-TTY stdin; spawnAgent closes it (empty input -> immediate EOF).
+      closeStdin: true,
+      command: "pi",
+      cwd: request.workspace,
+      env: environment,
+    });
     if (result.status !== 0 || result.signal !== null) {
       // stderr is often empty on a pi crash; fall back to stdout and name the signal so a timeout
-      // (SIGTERM) is not mistaken for a fast exit.
-      const detail = result.stderr?.trim() || result.stdout?.slice(-500)?.trim() || "(no output)";
+      // (SIGTERM) is not mistaken for a fast exit. Overflow and timeout are already raised as a
+      // typed ExecutorInfraError inside spawnAgent, so this only sees genuine agent-side failures.
+      const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
       const how = result.signal !== null ? `killed by ${result.signal}` : `exited ${result.status}`;
       throw new Error(`pi -p ${how}: ${detail}`);
     }

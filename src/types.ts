@@ -32,6 +32,9 @@ export interface FixtureCommandResult {
 export interface TrialResult {
   readonly checks: readonly Check[];
   readonly fixtureSetup?: readonly FixtureCommandResult[];
+  // A capture-layer failure (agent output too large to buffer, or a timeout) rather than a graded
+  // result. Such a trial has no bearing on whether the skill works and is excluded from the vote.
+  readonly infrastructure?: boolean;
   readonly pass: boolean;
   readonly usage: unknown;
 }
@@ -39,6 +42,9 @@ export interface TrialResult {
 export interface ArmResult {
   readonly arm: RuntimeArm;
   readonly cached: boolean;
+  // True when every trial was an infrastructure failure, so the arm could not be graded. Such an arm
+  // is not cached (the failure is transient - a re-run may succeed) and its pass is not a real signal.
+  readonly infrastructure?: boolean;
   readonly pass: boolean;
   readonly trials: readonly TrialResult[];
 }
