@@ -63,7 +63,10 @@ candidate case before anything else.
    **preference** (next section).
 3. **Read what is graded.** From the skill's `skillval.yml`, note which rules
    have a *behavioral* case (an `assert` with `must_match` / `must_not_match` /
-   graders), which have only a trigger case, and how many negatives exist.
+   `command_exit` / `json_schema` / graders), which have only a trigger case,
+   and how many negatives exist - and on which grader-ladder rung each
+   behavioral case sits (a regex-only case for a runtime behavior is itself a
+   gap; see the ladder in the stopping rules).
 4. **Diff and rank.** The gap is rules taught with no behavioral case. Rank by
    decay risk and decision value, **not** by which skills look thin (see the
    ranking rule below).
@@ -171,19 +174,33 @@ would make about it. Concretely:
 - **The case must be able to fail** (the test above). No nameable failure -> skip.
 - **Do not test the model instead of the skill.** If `solo` and `baseline` will
   obviously agree, the case measures model ability, not skill effect - skip.
-- **The barrier is quality, not presence.** This is the decision for when a
-  check crosses the line into needing a model judge. A deterministic assertion
-  can only honestly measure *presence* - did the behavior appear (a `debugInfo`
-  method, a correlation id, a typed error class). The moment a verdict depends on
-  *quality* - is it good, appropriate, complete, or distinguishable from a
-  lookalike - it has crossed into judgment, and a regex there returns a false
-  verdict wearing a green checkmark. **The tell you have crossed:** you can name a
-  lookalike the marker also matches - an `assert` that is input validation, not
-  an internal invariant; a `class FooError` that is trivial, not contract-naming.
-  Presence is skillval's territory; quality is the model judge's (roadmap). Until
-  that lands, assert presence where the marker is clean, and leave the quality
-  dimension explicitly flagged rather than faked - do not force a regex across the
-  barrier.
+- **Climb the grader ladder before declaring a case over the barrier.** The
+  ladder has three rungs, and each decides more than the one below:
+  1. **Regex measures presence** - a token appeared somewhere (a `debugInfo`
+     name, the word "correlation", `class \w*Error`). A comment satisfies it.
+  2. **Execution measures behavior** - `command_exit` runs a grading script
+     against the produced artifact and asserts what the code *does*: the
+     rejection is a typed subclass with the original `cause` preserved on the
+     chain, the debug snapshot truthfully reflects live state and changes
+     across a release, two boundary records share a per-call correlation id.
+     Much of what reads as "quality - judge territory" from the regex rung is
+     decidable here, deterministically. Before parking a case as
+     over-the-barrier, ask: can a script that stubs the dependencies and calls
+     the artifact decide this? Mechanics that make it safe: the script lives
+     in the case's `command_exit` command (written at grading time - NEVER in
+     a fixture, which lands in the workspace before the agent runs and leaks
+     the rubric to both arms); for held-out disposition prompts it probes the
+     skill's own taught idioms rather than prompt-pinned seams (pinning the
+     surface in the prompt names the technique and leads the witness); and it
+     ships with red/green validation - a known-good artifact that exits 0 and
+     a known-bad one that exits nonzero.
+  3. **Judgment stays out of reach** - is it good, appropriate, complete, or
+     distinguishable from a *lookalike the same execution also satisfies*: an
+     `assert` that is input validation rather than an internal invariant, a
+     span that is technically emitted but attribute-poor. **The tell:** you can
+     name a lookalike that passes the strongest script you can write. That is
+     the model judge's territory (roadmap); leave the dimension explicitly
+     flagged rather than faked - do not force a regex or a script across it.
 
 A skill is adequately covered when every capability rule that could decay has a
 case that could catch the decay, every preference has one representative case,
