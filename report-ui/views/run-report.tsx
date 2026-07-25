@@ -14,6 +14,7 @@ import type { InstructionAction, InstructionFinding, RunReport } from "../../src
 import type { ArmResult, CaseResult } from "../../src/types.js";
 import { armState } from "../../src/verdict.js";
 import { CheckDetail } from "../components/check-detail";
+import { DetailBody } from "../components/check-evidence";
 import { NavTabs } from "../components/nav-tabs";
 import { Primer } from "../components/primer";
 import { ReasonText, Term } from "../components/term";
@@ -251,8 +252,8 @@ function ArmEvidence({ arm }: { readonly arm: ArmResult }) {
                     >
                       {check.pass ? "pass" : "fail"}
                     </td>
-                    <td className="whitespace-pre-wrap break-words py-1 font-mono">
-                      {check.detail}
+                    <td className="py-1">
+                      <DetailBody detail={check.detail} />
                     </td>
                   </tr>
                 ))}

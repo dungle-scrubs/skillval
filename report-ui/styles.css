@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Animation utilities the shadcn primitives' data-[state] classes rely on (animate-in/out,
+   slide-in-from-right, fade, zoom) - the Tailwind v4 companion to tailwindcss-animate. */
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -88,6 +91,43 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --font-mono: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+}
+
+/* Radix measures collapsible content into this variable; the keyframes give the matrix rows and
+   primers a smooth open/close instead of a snap. */
+@keyframes collapsible-down {
+  from { height: 0; opacity: 0.6; }
+  to { height: var(--radix-collapsible-content-height); opacity: 1; }
+}
+@keyframes collapsible-up {
+  from { height: var(--radix-collapsible-content-height); opacity: 1; }
+  to { height: 0; opacity: 0.6; }
+}
+@utility animate-collapsible-down {
+  animation: collapsible-down 0.18s ease-out;
+}
+@utility animate-collapsible-up {
+  animation: collapsible-up 0.18s ease-in;
+}
+
+/* Motion is a courtesy, never a requirement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Inline code reads as code everywhere: a chip on bare code elements, but never inside pre
+   blocks, which carry their own surface. */
+code:not(pre code) {
+  background: color-mix(in oklab, var(--muted) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0.08rem 0.3rem;
 }
 
 body {

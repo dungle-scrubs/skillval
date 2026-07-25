@@ -69,7 +69,11 @@ describe("report app - run view", () => {
 
     expect(screen.getByText("What to change - skills")).toBeTruthy();
     expect(screen.getByText("Investigate")).toBeTruthy();
-    expect(screen.getByText(/got: what the model wrote/)).toBeTruthy();
+    // The detail renders structurally: the pattern as an inline chip, the got: content as its
+    // own labeled code block.
+    expect(screen.getByText("pattern")).toBeTruthy();
+    expect(screen.getByText(/what the model wrote/)).toBeTruthy();
+    expect(screen.getAllByText("got").length).toBeGreaterThan(0);
   });
 
   it("opens a rich glossary popover from a term chip", async () => {
