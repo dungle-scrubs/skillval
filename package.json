@@ -31,7 +31,8 @@
     "schema:check": "tsx scripts/generate-schemas.ts --check",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p report-ui",
-    "build:ui": "vite build --config report-ui/vite.config.ts && node scripts/embed-report-ui.mjs"
+    "build:ui": "vite build --config report-ui/vite.config.ts && node scripts/embed-report-ui.mjs",
+    "assets:check": "git diff --stat --exit-code -- src/generated/report-assets.ts"
   },
   "repository": {
     "type": "git",
@@ -67,6 +68,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/jsdom": "^28.0.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",

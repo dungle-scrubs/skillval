@@ -279,11 +279,14 @@ function SkillRow({ skill }: { readonly skill: SkillCoverage }) {
   }`;
   return (
     <Collapsible className="rounded-md border border-border bg-card">
-      <CollapsibleTrigger className="group grid w-full cursor-pointer grid-cols-[minmax(11rem,1.25fr)_6rem_3rem_minmax(8rem,1fr)_5.5rem_5rem] items-center gap-3.5 px-3.5 py-2 text-left hover:bg-accent/40 max-md:grid-cols-[1fr_3rem_minmax(6rem,1fr)]">
-        <span className="inline-flex items-center gap-1 font-mono font-semibold text-sm">
+      {/* The row is a plain grid, not the trigger: the composition segments carry their own
+          tooltip buttons, and interactive controls must never nest inside another button. Only
+          the name cell toggles the row. */}
+      <div className="grid grid-cols-[minmax(11rem,1.25fr)_6rem_3rem_minmax(8rem,1fr)_5.5rem_5rem] items-center gap-3.5 px-3.5 py-2 hover:bg-accent/40 max-md:grid-cols-[1fr_3rem_minmax(6rem,1fr)]">
+        <CollapsibleTrigger className="group inline-flex cursor-pointer items-center gap-1 text-left font-mono font-semibold text-sm hover:text-primary focus-visible:outline-2 focus-visible:outline-ring">
           <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
           {skill.name}
-        </span>
+        </CollapsibleTrigger>
         <span className="rounded-sm border border-border px-1.5 py-0.5 text-center text-[0.65rem] text-muted-foreground uppercase tracking-wide max-md:hidden">
           {skill.class}
         </span>
@@ -295,7 +298,7 @@ function SkillRow({ skill }: { readonly skill: SkillCoverage }) {
         <span className="text-right text-muted-foreground text-sm tabular-nums max-md:hidden">
           {share}%
         </span>
-      </CollapsibleTrigger>
+      </div>
       <CollapsibleContent className="border-border border-t px-3.5 py-3">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">

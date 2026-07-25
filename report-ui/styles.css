@@ -31,6 +31,7 @@
   --rung-regex: #7c4dff;
   --rung-execution: #1f8a52;
   --rung-ungraded: #8a857c;
+  --overlay: oklch(0.2 0.005 80 / 0.4);
 }
 
 .dark {
@@ -56,6 +57,7 @@
   --rung-regex: #9a75ff;
   --rung-execution: #37a066;
   --rung-ungraded: #7d786f;
+  --overlay: oklch(0.1 0.004 80 / 0.55);
 }
 
 @theme inline {
@@ -81,6 +83,7 @@
   --color-rung-regex: var(--rung-regex);
   --color-rung-execution: var(--rung-execution);
   --color-rung-ungraded: var(--rung-ungraded);
+  --color-overlay: var(--overlay);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

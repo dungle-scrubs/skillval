@@ -18,7 +18,14 @@ import { NavTabs } from "../components/nav-tabs";
 import { Primer } from "../components/primer";
 import { ReasonText, Term } from "../components/term";
 import { Badge } from "../components/ui/badge";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "../components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "../components/ui/sheet";
 import { cn } from "../lib/utils";
 
 const ACTION_BADGE: Readonly<
@@ -187,6 +194,9 @@ function EvidenceSheet({
           <SheetTitle className="font-mono text-base">
             {skillName} / {result.id}
           </SheetTitle>
+          <SheetDescription>
+            Every arm, trial, and deterministic check for this case.
+          </SheetDescription>
         </SheetHeader>
         {result.arms.map((arm) => (
           <ArmEvidence arm={arm} key={arm.arm} />
@@ -303,6 +313,9 @@ function InstructionActionPanel({ report }: { readonly report: RunReport }) {
                   ? (finding.naReason ?? "not applicable to this executor")
                   : FINDING_REASON[finding.verdict]}
               </p>
+              <div className="mt-2">
+                <ArmChips arms={finding.arms} />
+              </div>
             </li>
           ))}
         </ul>

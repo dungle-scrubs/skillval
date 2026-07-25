@@ -19,7 +19,7 @@ function SheetContent({
   return (
     <SheetPrimitive.Portal>
       <SheetPrimitive.Overlay
-        className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
+        className="fixed inset-0 z-50 bg-overlay data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
         data-slot="sheet-overlay"
       />
       <SheetPrimitive.Content
