@@ -104,6 +104,48 @@ describe("renderHtmlReport", () => {
     expect(html).toContain("no arms run");
   });
 
+  it("renders an inconclusive case as inconclusive, its infra arm labeled, never as a no-op", () => {
+    const html = renderHtmlReport(
+      {
+        executor,
+        runHash: "abc",
+        skills: {
+          "my-skill": {
+            cases: [
+              {
+                arms: [
+                  {
+                    arm: "solo",
+                    cached: false,
+                    infrastructure: true,
+                    pass: false,
+                    trials: [],
+                  },
+                  { arm: "baseline", cached: false, pass: true, trials: [] },
+                ],
+                id: "overflow-case",
+                inconclusive: true,
+                noop: false,
+                pass: false,
+                rule: undefined,
+              },
+            ],
+            class: "capability",
+            contentHash: "deadbeef",
+          },
+        },
+      },
+      context,
+    );
+
+    expect(html).toContain("inconclusive");
+    // The ungraded arm is labeled infra, not shown as a graded fail.
+    expect(html).toContain("solo infra");
+    expect(html).not.toContain("solo fail");
+    expect(html).not.toContain("FAIL");
+    expect(html).not.toContain("no-op");
+  });
+
   it("is a self-contained document with no external asset references", () => {
     const html = renderHtmlReport(reportWith({}), context);
 

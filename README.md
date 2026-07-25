@@ -27,6 +27,10 @@ Cases can record which kind they exercise with the `type` field (`capability` or
 - **`solo` pass, `baseline` pass** - the case passes with or without the skill; the model already
   does this. A no-op and a prune candidate.
 - **`solo` fail** - the skill did not produce the required behavior. A failing case to investigate.
+- **`solo` infra** - every trial of the arm hit an infrastructure failure (agent output too large to
+  capture, or a timeout), so the arm was never graded. The case is reported **inconclusive**: not a
+  failure, not a pass, and never a no-op - a passing `baseline` beside an ungraded `solo` proves
+  nothing about the skill. Infrastructure arms are never cached, so a rerun grades them fresh.
 
 `should_trigger`, when set, is checked only on arms where the skill under test is present (`solo`),
 never on `baseline`, where it is absent by design.
@@ -64,7 +68,8 @@ than one discovered skill (the same name under two roots), the first match wins 
 | `solo` fail, `peers` pass | **not needed at all** |
 
 The raw three arm results stay in the report; the verdict is a derived `loadout` block. Any other
-combination is reported as `inconclusive`. `should_trigger` is checked on `solo` and `group` (the
+combination is reported as `inconclusive`, and so is any combination in which a consulted arm was
+never graded (an infrastructure failure) - an ungraded arm supports no verdict. `should_trigger` is checked on `solo` and `group` (the
 target is present) but never on `peers`. The run summary calls out interference, the way it calls
 out no-ops.
 
@@ -243,7 +248,9 @@ Run every discovered skill that has a `skillval.yml` by omitting the skill names
 to select one case, `--no-cache` to ignore cached arm results, `--skip-baseline` to omit baseline
 arms, `--dry-run` to preview the trials a run would cost without spawning any (see
 [Cost preview](#cost-preview)), and `--json` for the complete report. The command exits with status 1
-when any selected case's solo arm fails.
+when any selected case fails, and with status 2 when nothing failed but at least one case was
+inconclusive (its deciding arm hit only infrastructure failures and was never graded) - not a
+content failure, but not a clean pass a script should act on either.
 
 Use `--model <model>` and `--effort <level>` to pin the executor's model and effort for the run,
 so you can evaluate one skill under, for example, `--model sonnet --effort medium`. Both pass

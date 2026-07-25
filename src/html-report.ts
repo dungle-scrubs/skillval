@@ -1,6 +1,7 @@
 /** Renders a run report as one self-contained HTML page: what to change, why, and the evidence. */
 import type { InstructionAction, InstructionFinding, RunReport } from "./runner.js";
 import type { Verdict } from "./verdict.js";
+import { armState } from "./verdict.js";
 
 // Why each verdict produced its action, in plain language tied to the arm that proved it. This is
 // the "why" the page leads with - a bare verdict word is not actionable on its own.
@@ -164,9 +165,15 @@ function renderSkills(report: RunReport): string {
       const skill = report.skills[name];
       if (skill === undefined) return [];
       return skill.cases.map((result) => {
-        const arms = result.arms.map((arm) => chip(arm.arm, arm.pass)).join("");
+        const arms = result.arms.map((arm) => chip(arm.arm, armState(arm))).join("");
         const verdict =
-          result.loadout === undefined ? (result.pass ? "pass" : "FAIL") : result.loadout.verdict;
+          result.loadout === undefined
+            ? result.inconclusive
+              ? "inconclusive"
+              : result.pass
+                ? "pass"
+                : "FAIL"
+            : result.loadout.verdict;
         return `<tr>
   <td><code>${escapeHtml(name)}</code></td>
   <td><code>${escapeHtml(result.id)}</code></td>
@@ -223,11 +230,13 @@ function badge(action: InstructionAction): string {
 function armChips(finding: InstructionFinding): string {
   if (finding.arms.length === 0)
     return '<div class="arms"><span class="chip chip-idle">no arms run</span></div>';
-  return `<div class="arms">${finding.arms.map((arm) => chip(arm.arm, arm.pass)).join("")}</div>`;
+  return `<div class="arms">${finding.arms.map((arm) => chip(arm.arm, armState(arm))).join("")}</div>`;
 }
 
-function chip(name: string, pass: boolean): string {
-  return `<span class="chip ${pass ? "chip-pass" : "chip-fail"}">${escapeHtml(name)} ${pass ? "pass" : "fail"}</span>`;
+// An infra arm was never graded, so its chip says so instead of masquerading as a content fail.
+function chip(name: string, state: "fail" | "infra" | "pass"): string {
+  if (state === "infra") return `<span class="chip chip-infra">${escapeHtml(name)} infra</span>`;
+  return `<span class="chip ${state === "pass" ? "chip-pass" : "chip-fail"}">${escapeHtml(name)} ${state}</span>`;
 }
 
 export function escapeHtml(value: string): string {
@@ -295,6 +304,7 @@ h3 { font-size: 1rem; margin: 0 0 .15rem; }
   border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .chip-pass { color: var(--keep); border-color: currentColor; }
 .chip-fail { color: var(--delete); border-color: currentColor; }
+.chip-infra { color: var(--review); border-color: currentColor; }
 .target { padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--line); }
 .target:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
 .table-scroll { overflow-x: auto; margin-top: .75rem; }

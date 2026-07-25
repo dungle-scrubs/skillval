@@ -2,6 +2,21 @@
 
 export type Verdict = "inconclusive" | "interference" | "load-bearing" | "prune" | "redundant";
 
+// What one arm contributes to a verdict. "infra" is an arm that could not be graded at all (every
+// trial was a capture-layer failure) - it is evidence of nothing, unlike "fail", which is a graded
+// result the model actually earned.
+export type ArmState = "fail" | "infra" | "pass";
+
+// Derives an arm's verdict contribution from its result shape (structural, so the result types in
+// types.ts can depend on this module without a cycle).
+export function armState(result: {
+  readonly infrastructure?: boolean;
+  readonly pass: boolean;
+}): ArmState {
+  if (result.infrastructure === true) return "infra";
+  return result.pass ? "pass" : "fail";
+}
+
 // User-facing wording, used in the report and the run summary. Kept plain on purpose.
 export const VERDICT_TEXT: Record<Verdict, string> = {
   inconclusive: "inconclusive - see the arm results",
@@ -36,23 +51,32 @@ export const INSTRUCTION_VERDICT_TEXT: Record<Verdict, string> = {
 // trigger check is skipped when the target is absent - so a completed peers trace passes vacuously.
 // peersMeaningful is false there, and any non-interference outcome is left inconclusive rather than
 // misreported as redundant or a no-op. Any unmatched combination is inconclusive too.
+//
+// An "infra" arm (never graded - every trial was a capture-layer failure) supports no verdict at
+// all: rather than salvage the sub-patterns that happen to remain decidable, any consulted arm
+// being infra yields inconclusive. Infra arms are never cached, so a re-run recovers the verdict.
+// Peers is only consulted when meaningful, so a vacuous infra peers arm does not block the
+// solo-vs-group comparison.
 export function groupVerdict(
-  solo: boolean,
-  group: boolean,
-  peers: boolean,
+  solo: ArmState,
+  group: ArmState,
+  peers: ArmState,
   peersMeaningful: boolean,
 ): Verdict {
-  if (solo && !group) {
+  if (solo === "infra" || group === "infra" || (peersMeaningful && peers === "infra")) {
+    return "inconclusive";
+  }
+  if (solo === "pass" && group === "fail") {
     // Peers meaningful and also failing means the loadout breaks the case on its own; the target is
     // not the culprit, so do not attribute interference to it.
-    if (peersMeaningful && !peers) return "inconclusive";
+    if (peersMeaningful && peers === "fail") return "inconclusive";
     return "interference";
   }
   if (!peersMeaningful) return "inconclusive";
-  if (group && !peers) return "load-bearing";
+  if (group === "pass" && peers === "fail") return "load-bearing";
   // prune before redundant: if the skill fails alone, "not needed at all" fits better than
   // "another skill already does it" (which implies the skill is itself capable).
-  if (!solo && peers) return "prune";
-  if (group && peers) return "redundant";
+  if (solo === "fail" && peers === "pass") return "prune";
+  if (group === "pass" && peers === "pass") return "redundant";
   return "inconclusive";
 }
