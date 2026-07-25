@@ -169,8 +169,8 @@ function Overall({ report }: { readonly report: CoverageReport }) {
           <Term k="regex" /> ({report.counts.regex}) - lexical presence in the output
         </LegendEntry>
         <LegendEntry swatch="bg-rung-execution">
-          <Term k="execution" /> ({report.counts.execution}) - runtime behavior via command_exit /
-          json_schema / tsc
+          <Term k="execution" /> ({report.counts.execution}) - deterministic proof via command_exit
+          / json_schema / tsc / ast
         </LegendEntry>
         {report.counts.ungraded > 0 ? (
           <LegendEntry swatch="bg-rung-ungraded">

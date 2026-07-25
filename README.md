@@ -353,9 +353,10 @@ validation error. Discovery only requires `SKILL.md`; evaluation requires a vali
 (written to `reports/coverage.html` under the state directory and opened, replacing the previous
 render - it is a view of the current suites, not a run artifact). Each case is classified onto a
 grader rung: **trigger-only** (proves the skill loads, says nothing about what it changes),
-**regex** (lexical presence in output), or **execution** (runtime behavior via `command_exit`,
-`json_schema`, or a registered grader; a case with both regex and execution graders counts as
-execution - its strongest evidence). The page shows per-rung totals, a composition bar whose
+**regex** (lexical presence in output), or **execution** (deterministic proof of the artifact
+beyond lexical matching - runtime behavior via `command_exit`, validation via `json_schema` or a
+registered grader, or structural `ast` rules; a case with several graders counts on its strongest
+evidence). The page shows per-rung totals, a composition bar whose
 segments carry hover tooltips explaining each rung, and a per-root matrix - skills sorted
 weakest-coverage-first - expandable to case-level graders, arms, and trials. Gap stats call out
 skills with zero behavioral cases, skills without a negative trigger case, and how many skills

@@ -7,6 +7,7 @@ import { Check as checkSchema, Errors as schemaErrors } from "typebox/value";
 import {
   AST_GRADER_MODES,
   astGraderSchema,
+  astRuleError,
   COMMAND_EXIT_GRADER_MODES,
   commandExitGraderSchema,
   GRADER_NAMES,
@@ -218,6 +219,21 @@ function validateAstGrader(evalCase: EvalCase, path: string): void {
     throw new CaseContractError(
       `${path} case "${evalCase.id}" ast file "${config.file}" must be a path inside the workspace`,
     );
+  }
+  // Compile every rule now: an unusable rule is a case-authoring error surfaced before any paid
+  // trial, mirroring regex and json_schema validation.
+  for (const [field, rules] of [
+    ["must_match", config.must_match],
+    ["must_not_match", config.must_not_match],
+  ] as const) {
+    for (const [index, rule] of (rules ?? []).entries()) {
+      const ruleError = astRuleError(config.file, rule);
+      if (ruleError !== null) {
+        throw new CaseContractError(
+          `${path} case "${evalCase.id}" has an invalid ast ${field}[${index}]: ${ruleError}`,
+        );
+      }
+    }
   }
 }
 

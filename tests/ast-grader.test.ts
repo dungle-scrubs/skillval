@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CaseContractError, parseCaseValue } from "../src/case-contract.js";
 import { runGraders } from "../src/graders.js";
 
 const workspaces: string[] = [];
@@ -141,6 +142,87 @@ describe("ast grader", () => {
     expect(checks[0]?.detail).toContain("must_match[0]");
   });
 
+  it("fails malformed source instead of passing a forbidden-only case against garbage", () => {
+    // tree-sitter recovers from syntax errors; without the ERROR-node check, this unparseable
+    // file contains no forbidden structure and would pass.
+    const checks = runGraders(
+      {
+        assert: {
+          ast: { file: "impl.ts", must_not_match: [{ pattern: "console.log($$$A)" }] },
+        },
+      },
+      workspaceWith("impl.ts", "export function {  = broken ("),
+    );
+    expect(checks[0]?.pass).toBe(false);
+    expect(checks[0]?.detail).toContain("does not parse");
+  });
+
+  it("grades .jsx with the JavaScript grammar and .cts as TypeScript", () => {
+    const jsx = runGraders(
+      { assert: { ast: { file: "app.jsx", must_match: [{ pattern: "<Widget />" }] } } },
+      workspaceWith("app.jsx", "export const App = () => <Widget />;\n"),
+    );
+    expect(jsx[0]).toMatchObject({ name: "ast", pass: true });
+
+    const cts = runGraders(
+      { assert: { ast: { file: "util.cts", must_match: [{ pattern: "module.exports = $V" }] } } },
+      workspaceWith("util.cts", "const x: number = 1;\nmodule.exports = x;\n"),
+    );
+    expect(cts[0]).toMatchObject({ name: "ast", pass: true });
+  });
+
+  it("refuses oversized files instead of parsing them", () => {
+    const checks = runGraders(
+      { assert: { ast: { file: "big.ts", must_match: [{ pattern: "x" }] } } },
+      workspaceWith("big.ts", `export const x = 1;\n${"// pad\n".repeat(900_000)}`),
+    );
+    expect(checks[0]?.pass).toBe(false);
+    expect(checks[0]?.detail).toContain("too large");
+  });
+});
+
+describe("ast grader case-load validation", () => {
+  const caseWith = (assert: Record<string, unknown>, mode = "generation") => ({
+    cases: [{ assert, id: "case", mode, prompt: "p" }],
+    class: "capability",
+    skill: "s",
+  });
+
+  it("rejects an invalid rule at case-load time, before any paid trial", () => {
+    expect(() =>
+      parseCaseValue(
+        caseWith({ ast: { file: "impl.ts", must_match: [{ nonsense_key: true }] } }),
+        "skillval.yml",
+      ),
+    ).toThrow(CaseContractError);
+    expect(() =>
+      parseCaseValue(
+        caseWith({ ast: { file: "impl.ts", must_match: [{ nonsense_key: true }] } }),
+        "skillval.yml",
+      ),
+    ).toThrow(/invalid ast must_match\[0\]/);
+  });
+
+  it("rejects trigger mode, empty rule sets, and traversal paths at load", () => {
+    expect(() =>
+      parseCaseValue(
+        caseWith({ ast: { file: "impl.ts", must_match: [{ pattern: "x" }] } }, "trigger"),
+        "skillval.yml",
+      ),
+    ).toThrow(/does not support trigger mode/);
+    expect(() => parseCaseValue(caseWith({ ast: { file: "impl.ts" } }), "skillval.yml")).toThrow(
+      /needs must_match or must_not_match/,
+    );
+    expect(() =>
+      parseCaseValue(
+        caseWith({ ast: { file: "../escape.ts", must_match: [{ pattern: "x" }] } }),
+        "skillval.yml",
+      ),
+    ).toThrow(/inside the workspace/);
+  });
+});
+
+describe("ast grader languages", () => {
   it("grades tsx files with the tsx language", () => {
     const checks = runGraders(
       {

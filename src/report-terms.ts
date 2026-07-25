@@ -30,10 +30,10 @@ export const TERMS = {
     what: "The control arm: what the model does WITHOUT the skill.",
   },
   execution: {
-    act: "The strongest deterministic evidence a case can carry - prefer it for runtime behavior.",
-    how: "command_exit runs a grading script against the produced artifact (or json_schema / tsc validate it) and grades on the result.",
+    act: "The strongest deterministic evidence a case can carry - prefer it for behavioral or structural requirements.",
+    how: "command_exit runs a grading script against the produced artifact; json_schema and tsc validate it; ast matches its parsed structure. All decide deterministically, beyond what text patterns can see.",
     title: "execution",
-    what: "A grader rung: the case is decided by running the produced code and asserting what it does.",
+    what: "A grader rung: the case is decided by proof about the produced artifact - what it does when run, or what shape its code actually has.",
   },
   inconclusive: {
     act: "Rerun the case - infrastructure results are never cached, so a rerun grades fresh.",

@@ -297,19 +297,51 @@ function gradeJsonSchema(workspace: string, config: JsonSchemaGraderConfig): Gra
   };
 }
 
-// Languages the ast grader parses, by produced-file extension. Kept to what ast-grep's builtin
-// napi languages cover; an unsupported extension is a clean grading failure, never a crash.
+// Languages the ast grader parses, by produced-file extension - aligned with ast-grep's own
+// extension table (jsx belongs to the JavaScript grammar, which parses JSX; tsx has its own).
+// An unsupported extension is a clean failure at case-load time, never a crash.
 const AST_LANGUAGES: Readonly<Record<string, Lang>> = {
   ".cjs": Lang.JavaScript,
   ".css": Lang.Css,
+  ".cts": Lang.TypeScript,
+  ".htm": Lang.Html,
   ".html": Lang.Html,
   ".js": Lang.JavaScript,
-  ".jsx": Lang.Tsx,
+  ".jsx": Lang.JavaScript,
   ".mjs": Lang.JavaScript,
   ".mts": Lang.TypeScript,
   ".ts": Lang.TypeScript,
   ".tsx": Lang.Tsx,
+  ".xhtml": Lang.Html,
 };
+
+// Inference reads the AUTHORED file path, so what the case says is what gets parsed - the
+// realpath target is used only for containment and reading.
+export function astLanguageFor(file: string): Lang | undefined {
+  return AST_LANGUAGES[extname(file).toLowerCase()];
+}
+
+// Case parsing calls this so an unusable rule is a case-authoring error surfaced before any paid
+// trial, mirroring jsonSchemaCompileError. ast-grep validates rule structure eagerly, so probing
+// a one-character source exercises the full rule compiler.
+export function astRuleError(file: string, rule: Record<string, unknown>): string | null {
+  const language = astLanguageFor(file);
+  if (language === undefined) {
+    return `unsupported file extension for ast grading: ${file}`;
+  }
+  try {
+    parse(language, "x")
+      .root()
+      .find({ rule } as never);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+// Beyond this size, parsing and matching stop being cheap deterministic checks; produced files a
+// case should grade structurally are orders of magnitude smaller.
+const AST_MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 function gradeAst(workspace: string, config: AstGraderConfig): GraderCheck {
   const workspaceRoot = safeRealpath(resolve(workspace));
@@ -329,7 +361,14 @@ function gradeAst(workspace: string, config: AstGraderConfig): GraderCheck {
   if (stats === null || !stats.isFile()) {
     return { detail: `not a regular file: ${config.file}`, name: "ast", pass: false };
   }
-  const language = AST_LANGUAGES[extname(target).toLowerCase()];
+  if (stats.size > AST_MAX_FILE_BYTES) {
+    return {
+      detail: `file too large for ast grading (${stats.size} bytes > ${AST_MAX_FILE_BYTES}): ${config.file}`,
+      name: "ast",
+      pass: false,
+    };
+  }
+  const language = astLanguageFor(config.file);
   if (language === undefined) {
     return {
       detail: `unsupported file extension for ast grading: ${config.file}`,
@@ -345,17 +384,31 @@ function gradeAst(workspace: string, config: AstGraderConfig): GraderCheck {
     const message = error instanceof Error ? error.message : String(error);
     return { detail: `failed to parse ${config.file}: ${message}`, name: "ast", pass: false };
   }
-  const findAll = (rule: Record<string, unknown>, label: string) => {
+  const find = (rule: Record<string, unknown>, label: string) => {
     try {
-      return root.findAll({ rule } as Parameters<typeof root.findAll>[0]);
+      return root.find({ rule } as never);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`invalid ast rule (${label}): ${message}`);
     }
   };
   try {
+    // tree-sitter recovers from syntax errors instead of throwing, leaving ERROR nodes in the
+    // tree. A tree with errors must fail: a forbidden-only case would otherwise pass against
+    // garbage simply because the prohibited structure did not survive parsing. (Limitation:
+    // recovery can also INSERT missing nodes without an ERROR node; structural grading assumes
+    // parseable output, and pairing with tsc closes the remainder for TypeScript.)
+    const parseError = find({ kind: "ERROR" }, "syntax check");
+    if (parseError !== null) {
+      const line = parseError.range().start.line + 1;
+      return {
+        detail: `${config.file} does not parse (syntax error at line ${line}); structural rules were not evaluated`,
+        name: "ast",
+        pass: false,
+      };
+    }
     for (const [index, rule] of (config.must_match ?? []).entries()) {
-      if (findAll(rule, `must_match[${index}]`).length === 0) {
+      if (find(rule, `must_match[${index}]`) === null) {
         return {
           detail: `ast must_match[${index}] matched nothing: ${JSON.stringify(rule).slice(0, 200)}`,
           name: "ast",
@@ -364,9 +417,8 @@ function gradeAst(workspace: string, config: AstGraderConfig): GraderCheck {
       }
     }
     for (const [index, rule] of (config.must_not_match ?? []).entries()) {
-      const matches = findAll(rule, `must_not_match[${index}]`);
-      const first = matches[0];
-      if (first !== undefined) {
+      const first = find(rule, `must_not_match[${index}]`);
+      if (first !== null) {
         const line = first.range().start.line + 1;
         return {
           detail: `ast must_not_match[${index}] matched at ${config.file}:${line}: ${first.text().slice(0, 120)}`,
