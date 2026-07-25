@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
+import { spawnAgent } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -14,8 +15,6 @@ import {
   type SeededSkill,
   type TrialRequest,
 } from "./types.js";
-
-const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
 // codex forwards model_reasoning_effort straight to the Responses API without local validation, so
 // these are the API's supported reasoning.effort values. Per-model support is a subset the API
@@ -71,9 +70,9 @@ export class CodexExecutor implements Executor {
       CODEX_HOME: prepareCleanCodexHome(request.home, this.#realHome),
       HOME: request.home,
     };
-    const result = spawnSync(
-      "codex",
-      [
+    const result = spawnAgent({
+      // codex takes its working directory from -C, so no cwd is passed to the process.
+      args: [
         "exec",
         "--json",
         "--skip-git-repo-check",
@@ -85,15 +84,11 @@ export class CodexExecutor implements Executor {
         request.workspace,
         request.evalCase.prompt,
       ],
-      {
-        encoding: "utf8",
-        env: environment,
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: TRIAL_TIMEOUT_MS,
-      },
-    );
+      command: "codex",
+      env: environment,
+    });
     if (result.status !== 0) {
-      throw new Error(`codex exec exited ${result.status}: ${result.stderr?.slice(-500)}`);
+      throw new Error(`codex exec exited ${result.status}: ${result.stderr.slice(-500)}`);
     }
 
     return parseCodexTrace(result.stdout, request.skillName);

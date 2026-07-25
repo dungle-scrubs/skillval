@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
+import { spawnAgent } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -21,8 +22,6 @@ import {
   type SeededSkill,
   type TrialRequest,
 } from "./types.js";
-
-const TRIAL_TIMEOUT_MS = 15 * 60 * 1000;
 
 // Claude Code effort levels, from `claude --effort`.
 export const CLAUDE_EFFORT_LEVELS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
@@ -69,9 +68,8 @@ export class ClaudeExecutor implements Executor {
       ...process.env,
       CLAUDE_CONFIG_DIR: prepareCleanConfig(request.home, this.#realConfigDirectory),
     };
-    const result = spawnSync(
-      "claude",
-      [
+    const result = spawnAgent({
+      args: [
         "-p",
         request.evalCase.prompt,
         "--output-format",
@@ -81,16 +79,12 @@ export class ClaudeExecutor implements Executor {
         ...selection,
         ...permissions,
       ],
-      {
-        cwd: request.workspace,
-        encoding: "utf8",
-        env: environment,
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: TRIAL_TIMEOUT_MS,
-      },
-    );
+      command: "claude",
+      cwd: request.workspace,
+      env: environment,
+    });
     if (result.status !== 0) {
-      throw new Error(`claude -p exited ${result.status}: ${result.stderr?.slice(-500)}`);
+      throw new Error(`claude -p exited ${result.status}: ${result.stderr.slice(-500)}`);
     }
 
     return parseClaudeTrace(result.stdout, request.skillName);

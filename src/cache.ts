@@ -8,7 +8,9 @@ import { sha256 } from "./utils.js";
 
 // Bump this whenever execution or grading semantics change so old results cannot be reused.
 // 13: instruction-file arms and the instructionHash cache-identity field.
-export const RUNNER_VERSION = 13;
+// 14: agent stdout captured with a 256MB cap; overflow/timeout recorded as an infrastructure
+//     failure instead of a content result, changing the verdict of large-output trials.
+export const RUNNER_VERSION = 14;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

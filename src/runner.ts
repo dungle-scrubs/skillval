@@ -16,6 +16,7 @@ import type {
 } from "./discovery.js";
 import { discoverProjects, discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
+import { ExecutorInfraError } from "./executors/spawn.js";
 import type { Executor, ExecutorMetadata } from "./executors/types.js";
 import type { ResolvedFixture } from "./fixture.js";
 import { applyFixture, FixtureSetupError, resolveFixture, selectFixture } from "./fixture.js";
@@ -1096,21 +1097,71 @@ function runInstructionArm(context: InstructionArmContext, arm: RuntimeArm): Arm
     if (hit !== undefined) return hit;
   }
 
-  const trials: TrialResult[] = [];
-  const wanted = clampedTrialCount(context.evalCase.trials);
-  for (let index = 0; index < wanted; index += 1) {
-    trials.push(runInstructionTrial(context, arm));
-  }
-  while (shouldEscalate(trials)) trials.push(runInstructionTrial(context, arm));
-
-  const result: ArmResult = {
-    arm,
-    cached: false,
-    pass: hasMajority(trials),
-    trials,
-  };
-  context.cache.store(identity, result);
+  const trials = collectArmTrials(clampedTrialCount(context.evalCase.trials), () =>
+    runInstructionTrial(context, arm),
+  );
+  const { cache, result } = finalizeArm(arm, trials);
+  if (cache) context.cache.store(identity, result);
   return result;
+}
+
+// Translates a thrown trial error into a failed TrialResult, keeping capture-layer infrastructure
+// failures (fixture setup, output overflow, timeout) under their own check names so the report never
+// reads them as a graded skill result. Shared by the skill and instruction trial paths.
+function trialErrorResult(error: unknown): TrialResult {
+  if (error instanceof FixtureSetupError) {
+    // Workspace staging failed before the agent ran; this is infrastructure, not grading.
+    return {
+      checks: [{ detail: error.message, name: "fixture-setup", pass: false }],
+      fixtureSetup: error.results,
+      pass: false,
+      usage: undefined,
+    };
+  }
+  if (error instanceof ExecutorInfraError) {
+    // The agent produced no usable trace (output too large to buffer, or a timeout). Flagged so the
+    // arm excludes it from the vote and does not cache a runaway as though it were a graded result.
+    return {
+      checks: [{ detail: error.message, name: "infrastructure", pass: false }],
+      infrastructure: true,
+      pass: false,
+      usage: undefined,
+    };
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  return {
+    checks: [{ detail, name: "run", pass: false }],
+    pass: false,
+    usage: undefined,
+  };
+}
+
+// Runs an arm's configured trials, escalating to at most five when the graded trials disagree.
+// Infrastructure trials (capture-layer failures) never count toward agreement and cannot force
+// escalation, but do count toward the five-trial ceiling so a persistent failure cannot loop.
+export function collectArmTrials(wanted: number, runOne: () => TrialResult): TrialResult[] {
+  const trials: TrialResult[] = [];
+  for (let index = 0; index < wanted; index += 1) trials.push(runOne());
+  const graded = (): TrialResult[] => trials.filter((trial) => trial.infrastructure !== true);
+  while (trials.length < 5 && shouldEscalate(graded())) trials.push(runOne());
+  return trials;
+}
+
+// Builds an arm result, voting only on graded trials. An arm whose every trial was an infrastructure
+// failure could not be graded: its pass is not a real signal, so the caller must not cache it (the
+// failure is transient and a re-run may capture a usable trace). Returns whether it is safe to cache.
+export function finalizeArm(
+  arm: RuntimeArm,
+  trials: readonly TrialResult[],
+): { cache: boolean; result: ArmResult } {
+  const graded = trials.filter((trial) => trial.infrastructure !== true);
+  if (graded.length === 0) {
+    return {
+      cache: false,
+      result: { arm, cached: false, infrastructure: true, pass: false, trials },
+    };
+  }
+  return { cache: true, result: { arm, cached: false, pass: hasMajority(graded), trials } };
 }
 
 function runInstructionTrial(context: InstructionArmContext, arm: RuntimeArm): TrialResult {
@@ -1139,20 +1190,7 @@ function runInstructionTrial(context: InstructionArmContext, arm: RuntimeArm): T
       usage: trace.usage,
     };
   } catch (error) {
-    if (error instanceof FixtureSetupError) {
-      return {
-        checks: [{ detail: error.message, name: "fixture-setup", pass: false }],
-        fixtureSetup: error.results,
-        pass: false,
-        usage: undefined,
-      };
-    }
-    const detail = error instanceof Error ? error.message : String(error);
-    return {
-      checks: [{ detail, name: "run", pass: false }],
-      pass: false,
-      usage: undefined,
-    };
+    return trialErrorResult(error);
   } finally {
     rmSync(workspace, { force: true, recursive: true });
     rmSync(trialHome, { force: true, recursive: true });
@@ -1181,21 +1219,11 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
     if (hit !== undefined) return hit;
   }
 
-  const trials: TrialResult[] = [];
-  const wanted = clampedTrialCount(context.evalCase.trials);
-  for (let index = 0; index < wanted; index += 1) {
-    trials.push(runTrial(context, arm, seeded));
-  }
-  // A disagreement makes the configured sample inconclusive, so collect the full five trials.
-  while (shouldEscalate(trials)) trials.push(runTrial(context, arm, seeded));
-
-  const result: ArmResult = {
-    arm,
-    cached: false,
-    pass: hasMajority(trials),
-    trials,
-  };
-  context.cache.store(identity, result);
+  const trials = collectArmTrials(clampedTrialCount(context.evalCase.trials), () =>
+    runTrial(context, arm, seeded),
+  );
+  const { cache, result } = finalizeArm(arm, trials);
+  if (cache) context.cache.store(identity, result);
   return result;
 }
 
@@ -1229,21 +1257,7 @@ function runTrial(
       usage: trace.usage,
     };
   } catch (error) {
-    if (error instanceof FixtureSetupError) {
-      // Workspace staging failed before the agent ran; this is infrastructure, not grading.
-      return {
-        checks: [{ detail: error.message, name: "fixture-setup", pass: false }],
-        fixtureSetup: error.results,
-        pass: false,
-        usage: undefined,
-      };
-    }
-    const detail = error instanceof Error ? error.message : String(error);
-    return {
-      checks: [{ detail, name: "run", pass: false }],
-      pass: false,
-      usage: undefined,
-    };
+    return trialErrorResult(error);
   } finally {
     // Trials may contain generated source or credentials-related environment state. Always clean
     // both directories, including executor and grader failure paths.
