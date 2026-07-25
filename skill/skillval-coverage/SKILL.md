@@ -1,6 +1,6 @@
 ---
 name: skillval-coverage
-description: "Audit eval coverage for the agent skills skillval discovers and decide what is worth testing, and diagnose ineffective tests by reading run output. Use when the user asks which skills or rules need skillval cases, wants to find eval gaps or coverage opportunities, asks whether a particular rule is worth a case, wants to spot stale cases to prune, or asks why a case failed / passed / whether a verdict can be trusted / how to fix a flaky or misleading case. Guides the keep / prune / stop and fix-the-case decisions; it diagnoses and proposes, it does not silently rewrite or run case files."
+description: "Audit eval coverage for the agent skills skillval discovers and decide what is worth testing, and diagnose ineffective tests by reading run output. Use when the user asks which skills or rules need skillval cases, wants to find eval gaps or coverage opportunities, asks whether a particular rule is worth a case, wants to spot stale cases to prune, or asks why a case failed / passed / whether a verdict can be trusted / how to fix a flaky or misleading case. Guides the keep / prune / stop and fix-the-case decisions; it diagnoses and proposes, it does not silently rewrite or run case files. Not for simply running a suite or reporting whether it passes - executing skillval and reading a green result is plain usage with no coverage judgment involved; reach for this skill only when a decision about cases themselves is on the table."
 metadata:
   icon: 🎯
 ---

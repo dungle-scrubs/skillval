@@ -107,7 +107,10 @@ cases:
       # Refuses to tune a discriminator onto identical output; names it a no-op.
       must_match:
         - "no-?op|already does|prune|redundant|same|identical"
-        - "should not|don'?t|can'?t|isn'?t.{0,20}legitimate|game|not.{0,15}separate"
+        # Models write curly apostrophes: don’t. Both apostrophe forms (and none) match,
+        # so the refusal is graded on substance, not typography - the false-fail this
+        # pattern produced was itself diagnosed by this skill's own doctrine.
+        - "should not|don['’]?t|can['’]?t|isn['’]?t.{0,20}legitimate|game|not.{0,15}separate"
     trials: 1
 
   # Fires on a coverage-strategy request.
