@@ -18,6 +18,41 @@
           "assert": {
             "type": "object",
             "properties": {
+              "ast": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "description": "Produced file, relative to the workspace, parsed for structural matching.",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "must_match": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {}
+                      }
+                    },
+                    "description": "ast-grep rule objects that must each match at least once.",
+                    "minItems": 1
+                  },
+                  "must_not_match": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "patternProperties": {
+                        "^.*$": {}
+                      }
+                    },
+                    "description": "ast-grep rule objects that must match nowhere.",
+                    "minItems": 1
+                  }
+                },
+                "additionalProperties": false
+              },
               "command_exit": {
                 "type": "object",
                 "required": ["command"],

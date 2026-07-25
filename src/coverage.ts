@@ -70,7 +70,11 @@ export interface CoverageReport {
 
 export function caseRung(evalCase: EvalCase): GraderRung {
   const assert = evalCase.assert;
+  // ast counts as the execution rung: structural proof of the produced artifact - deterministic
+  // evidence beyond lexical presence, grouped with runtime proof until the distinction earns a
+  // rung of its own.
   if (
+    assert?.ast !== undefined ||
     assert?.command_exit !== undefined ||
     assert?.json_schema !== undefined ||
     (assert?.graders?.length ?? 0) > 0
@@ -95,6 +99,10 @@ export function caseGraderLabels(evalCase: EvalCase): readonly string[] {
   const rejections = assert?.must_not_match?.length ?? 0;
   if (rejections > 0) {
     labels.push(rejections === 1 ? "must_not_match" : `must_not_match x${rejections}`);
+  }
+  if (assert?.ast !== undefined) {
+    const rules = (assert.ast.must_match?.length ?? 0) + (assert.ast.must_not_match?.length ?? 0);
+    labels.push(rules === 1 ? "ast" : `ast x${rules}`);
   }
   if (assert?.json_schema !== undefined) labels.push("json_schema");
   if (assert?.command_exit !== undefined) labels.push("command_exit");

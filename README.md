@@ -438,6 +438,16 @@ Case fields:
   JSON; a schema mismatch reports the failing instance path. Omit `$schema` or set it to 2020-12;
   other declared dialects, an escaping `file` path, or a schema that does not compile are validation
   errors.
+- `assert.ast`: parses a produced file (TypeScript, TSX, JavaScript, CSS, HTML by extension) and
+  grades its STRUCTURE with [ast-grep](https://ast-grep.github.io/) rule objects: every
+  `must_match` rule needs at least one match, any `must_not_match` match fails with the offending
+  line. This decides placement facts regex cannot see and execution cannot always separate - the
+  canonical case is the validation-vs-invariant lookalike, where an `assert(param > 0)` in a
+  constructor is input validation but a `this.`-referencing guard in an operation is an internal
+  invariant. Structural matching also cannot be satisfied by a comment. Pure parsing on the
+  grading machine - no shell runs, so `--allow-shell` is not required. In the coverage matrix an
+  ast case counts on the execution rung: deterministic proof of the artifact beyond lexical
+  presence.
 - `assert.command_exit`: runs a shell command in the workspace and passes when it exits with the
   expected code, for generation cases. Takes `command` and optional `expect` (default `0`). The
   command is case-authored arbitrary shell, the same trust level as fixture `setup`, and is off by

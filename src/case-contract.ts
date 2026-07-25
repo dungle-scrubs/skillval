@@ -5,6 +5,8 @@ import type { Static } from "typebox";
 import Type from "typebox";
 import { Check as checkSchema, Errors as schemaErrors } from "typebox/value";
 import {
+  AST_GRADER_MODES,
+  astGraderSchema,
   COMMAND_EXIT_GRADER_MODES,
   commandExitGraderSchema,
   GRADER_NAMES,
@@ -45,6 +47,7 @@ export const fixtureSchema = Type.ReadonlyObject(
 
 export const caseAssertSchema = Type.ReadonlyObject(
   Type.Object({
+    ast: Type.Optional(astGraderSchema),
     command_exit: Type.Optional(commandExitGraderSchema),
     graders: Type.Optional(
       Type.Readonly(Type.Array(Type.Enum(GRADER_NAMES), { uniqueItems: true })),
@@ -173,6 +176,7 @@ export function parseCaseValue(value: unknown, path: string, expectedSkill?: str
     validateGraders(evalCase, path);
     validateJsonSchemaGrader(evalCase, path);
     validateCommandExitGrader(evalCase, path);
+    validateAstGrader(evalCase, path);
   }
   return value;
 }
@@ -191,6 +195,29 @@ function validateInstructionRequirements(value: unknown, path: string): void {
         `${path} case "${candidate.id}" target "instructions" must not declare "should_trigger"`,
       );
     }
+  }
+}
+
+function validateAstGrader(evalCase: EvalCase, path: string): void {
+  const config = evalCase.assert?.ast;
+  if (config === undefined) return;
+  if (!AST_GRADER_MODES.includes(evalCase.mode)) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" grader "ast" does not support ${evalCase.mode} mode`,
+    );
+  }
+  if (config.must_match === undefined && config.must_not_match === undefined) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" ast grader needs must_match or must_not_match rules`,
+    );
+  }
+  // Reject parent traversal by path segment, not string prefix, so a legitimate filename such as
+  // "..impl.ts" is allowed while "../x" is not.
+  const segments = normalize(config.file).split(/[/\\]/);
+  if (isAbsolute(config.file) || segments.includes("..")) {
+    throw new CaseContractError(
+      `${path} case "${evalCase.id}" ast file "${config.file}" must be a path inside the workspace`,
+    );
   }
 }
 

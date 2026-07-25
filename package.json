@@ -52,6 +52,7 @@
   },
   "packageManager": "pnpm@10.28.2",
   "dependencies": {
+    "@ast-grep/napi": "^0.45.0",
     "@types/node": "^22.0.0",
     "ajv": "^8.20.0",
     "commander": "^15.0.0",
