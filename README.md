@@ -186,7 +186,9 @@ Every finding keeps its raw arm results, so the reasoning stays inspectable.
 After each run skillval writes a self-contained HTML report beside the JSON one and opens it. It
 leads with **what to change**: every rule flagged `delete` or `review`, with the exact span to act
 on, why it was flagged (tied to the arm that proved it), and the arm evidence beside the
-recommendation. The page has no external assets or scripts and follows the system light/dark theme.
+recommendation. The page is a single file embedding its own React app and stylesheet - it
+references nothing on the network, works from `file://`, and follows the system light/dark theme.
+Report content is rendered by React (escaped by construction), never templated into markup.
 
 Reports carry a two-tab nav (Latest run | Coverage): `latest.html` is a stable alias refreshed
 after every HTML-enabled run (with `htmlReport: false` it is left untouched and may lag or not

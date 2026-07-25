@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * skillval's report identity mapped onto the shadcn token set: warm paper neutrals, the brand
+ * purple as primary, and the validated rung palette carried as first-class tokens. Both themes are
+ * designed, not inverted; the .dark class is stamped pre-paint from prefers-color-scheme.
+ */
+:root {
+  --radius: 0.55rem;
+  --background: oklch(0.986 0.003 84);
+  --foreground: oklch(0.23 0.005 80);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.23 0.005 80);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.23 0.005 80);
+  --primary: oklch(0.58 0.23 288);
+  --primary-foreground: oklch(0.99 0 0);
+  --muted: oklch(0.955 0.004 84);
+  --muted-foreground: oklch(0.5 0.01 80);
+  --accent: oklch(0.94 0.02 288);
+  --accent-foreground: oklch(0.3 0.05 288);
+  --destructive: oklch(0.55 0.19 38);
+  --border: oklch(0.905 0.007 84);
+  --input: oklch(0.905 0.007 84);
+  --ring: oklch(0.58 0.23 288);
+  --success: oklch(0.55 0.13 155);
+  --warning: oklch(0.6 0.13 65);
+  --rung-trigger: #b45309;
+  --rung-regex: #7c4dff;
+  --rung-execution: #1f8a52;
+  --rung-ungraded: #8a857c;
+}
+
+.dark {
+  --background: oklch(0.17 0.004 80);
+  --foreground: oklch(0.945 0.005 84);
+  --card: oklch(0.213 0.004 80);
+  --card-foreground: oklch(0.945 0.005 84);
+  --popover: oklch(0.213 0.004 80);
+  --popover-foreground: oklch(0.945 0.005 84);
+  --primary: oklch(0.68 0.19 290);
+  --primary-foreground: oklch(0.15 0.02 290);
+  --muted: oklch(0.25 0.004 80);
+  --muted-foreground: oklch(0.68 0.008 84);
+  --accent: oklch(0.28 0.04 290);
+  --accent-foreground: oklch(0.85 0.06 290);
+  --destructive: oklch(0.68 0.17 45);
+  --border: oklch(0.285 0.005 80);
+  --input: oklch(0.285 0.005 80);
+  --ring: oklch(0.68 0.19 290);
+  --success: oklch(0.68 0.13 155);
+  --warning: oklch(0.72 0.13 70);
+  --rung-trigger: #cf7228;
+  --rung-regex: #9a75ff;
+  --rung-execution: #37a066;
+  --rung-ungraded: #7d786f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-rung-trigger: var(--rung-trigger);
+  --color-rung-regex: var(--rung-regex);
+  --color-rung-execution: var(--rung-execution);
+  --color-rung-ungraded: var(--rung-ungraded);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}

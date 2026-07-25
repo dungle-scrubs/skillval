@@ -15,5 +15,6 @@
     "target": "ES2023",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["scripts", "src", "tests"]
+  "include": ["scripts", "src", "tests"],
+  "exclude": ["tests/ui"]
 }

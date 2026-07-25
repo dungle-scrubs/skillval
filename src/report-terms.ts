@@ -1,10 +1,9 @@
 /**
- * The single source of truth for report terminology, and the no-script quick-view machinery that
- * teaches it. Reports are read weeks apart; the design assumption is a reader who has forgotten how
- * skillval works, so every load-bearing term self-explains at point of use. Both renderers import
- * this module - definitions exist once and cannot drift between pages.
+ * The single source of truth for report terminology. Reports are read weeks apart; the design
+ * assumption is a reader who has forgotten how skillval works, so every load-bearing term
+ * self-explains at point of use - the report UI renders each term as a rich popover built from
+ * these definitions. Pure data: the React report app and the node-side tests both import it.
  */
-import { escapeHtml } from "./html-report.js";
 
 export interface TermDefinition {
   // What to do with the information - the action a re-taught reader takes.
@@ -16,7 +15,7 @@ export interface TermDefinition {
   readonly what: string;
 }
 
-// Keys are stable slugs used in popover ids; titles are the visible words.
+// Keys are stable slugs; titles are the visible words.
 export const TERMS = {
   arm: {
     act: "Read a case's arms side by side; every verdict is a comparison between them.",
@@ -108,103 +107,6 @@ export const TERMS = {
     title: "ungraded",
     what: "A case with no grader at all. It is evidence of nothing.",
   },
-};
+} as const satisfies Readonly<Record<string, TermDefinition>>;
 
 export type TermKey = keyof typeof TERMS;
-
-// An inline term reference: a real button (keyboard-reachable) that opens the term's quick-view
-// sidebar. Visible text defaults to the term's title but can be any inflection of it.
-export function termButton(key: TermKey, text?: string): string {
-  const term: TermDefinition = TERMS[key];
-  return `<button class="term" popovertarget="term-${key}" type="button">${escapeHtml(text ?? term.title)}</button>`;
-}
-
-// The quick-view panels, one per term, appended once per page. Native popovers: light-dismiss and
-// Esc for free, floated as a right sidebar by the shared styles, and no scripts involved.
-export function renderTermPanels(): string {
-  return Object.entries(TERMS)
-    .map(
-      ([
-        key,
-        term,
-      ]) => `<aside id="term-${key}" class="quickview" popover role="dialog" aria-labelledby="term-${key}-title">
-  <header><span class="qv-kicker">terminology</span><h3 id="term-${key}-title">${escapeHtml(term.title)}</h3></header>
-  <dl>
-    <dt>What it means</dt><dd>${escapeHtml(term.what)}</dd>
-    <dt>How it is computed</dt><dd>${escapeHtml(term.how)}</dd>
-    <dt>What to do</dt><dd>${escapeHtml(term.act)}</dd>
-  </dl>
-  <button class="qv-close" popovertarget="term-${key}" popovertargetaction="hide" type="button" autofocus>Close</button>
-</aside>`,
-    )
-    .join("\n");
-}
-
-// The tab bar shared by the two report pages. Relative links within the reports directory, so it
-// works from file:// with no scripts; the active page is a non-link. A hash-named archived run
-// must not claim to be the latest: it gets its own "This run" tab, with "Latest run" as a live
-// link to the alias.
-export function renderReportNav(active: "coverage" | "run" | "run-archive"): string {
-  const parts: string[] = [];
-  if (active === "run") {
-    parts.push('<span class="tab tab-active" aria-current="page">Latest run</span>');
-  } else {
-    parts.push('<a class="tab" href="latest.html">Latest run</a>');
-  }
-  if (active === "run-archive") {
-    parts.push('<span class="tab tab-active" aria-current="page">This run (archived)</span>');
-  }
-  if (active === "coverage") {
-    parts.push('<span class="tab tab-active" aria-current="page">Coverage</span>');
-  } else {
-    parts.push('<a class="tab" href="coverage.html">Coverage</a>');
-  }
-  return `<nav class="tabs" aria-label="report pages">${parts.join("")}</nav>`;
-}
-
-// Styles for the nav, the term buttons, and the right-sidebar quick-views. Shared verbatim by both
-// renderers so the affordances look identical across tabs.
-export const TERM_STYLES = `
-.tabs { display: flex; gap: .25rem; margin: 1rem 0 0; }
-.tab { font-size: .85rem; font-weight: 600; color: var(--muted); text-decoration: none;
-  padding: .35rem .8rem; border: 1px solid var(--line); border-bottom: 0;
-  border-radius: .5rem .5rem 0 0; background: transparent; }
-.tab:hover { color: var(--ink); }
-.tab-active { color: var(--accent); background: var(--surface); position: relative; }
-.tab-active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
-  background: var(--surface); }
-.term { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: help;
-  text-decoration: underline dotted; text-underline-offset: 3px;
-  text-decoration-color: var(--accent); }
-.term:hover { color: var(--accent); }
-.term:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-.quickview { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(34rem, 94vw); height: 100%;
-  max-height: 100%; border: 0; border-left: 1px solid var(--line); background: var(--surface);
-  color: var(--ink); padding: 1.4rem 1.5rem; overflow-y: auto;
-  box-shadow: -12px 0 40px rgba(0, 0, 0, .18); }
-.quickview::backdrop { background: rgba(0, 0, 0, .28); }
-.quickview header { display: flex; flex-direction: column; gap: .15rem; margin-bottom: .9rem;
-  border-bottom: 1px solid var(--line); padding-bottom: .7rem; }
-.qv-kicker { font-family: var(--mono); font-size: .72rem; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--accent); }
-.quickview h3 { margin: 0; font-size: 1.15rem; }
-.quickview dl { margin: 0; }
-.quickview dt { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em;
-  color: var(--muted); font-weight: 600; margin-top: .8rem; }
-.quickview dd { margin: .25rem 0 0; font-size: .92rem; line-height: 1.55; }
-.qv-close { margin-top: 1.2rem; font: inherit; font-size: .85rem; color: var(--muted);
-  background: none; border: 1px solid var(--line); border-radius: .4rem; padding: .3rem .8rem;
-  cursor: pointer; }
-.qv-close:hover { color: var(--ink); }
-.qv-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.primer { background: var(--surface); border: 1px solid var(--line); border-radius: .6rem;
-  margin: 0 0 1.2rem; }
-.primer > summary { padding: .6rem .9rem; cursor: pointer; font-size: .88rem; font-weight: 600;
-  color: var(--muted); list-style: none; }
-.primer > summary::-webkit-details-marker { display: none; }
-.primer > summary::before { content: "\\2192  "; color: var(--accent); }
-.primer[open] > summary { border-bottom: 1px solid var(--line); color: var(--ink); }
-.primer .primer-body { padding: .8rem .9rem .9rem; font-size: .9rem; line-height: 1.6; }
-.primer .primer-body p { margin: 0 0 .6rem; }
-.primer .primer-body p:last-child { margin-bottom: 0; }
-`;

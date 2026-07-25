@@ -34,6 +34,15 @@ agent guidance.
 - `src/discovery.ts` - a skill is evaluatable when `skillval.yml` sits
   beside its SKILL.md. JSON Schemas for config and case files live in
   `schemas/`.
+- `report-ui/` - the React + Tailwind v4 + shadcn report app (run report
+  and coverage views). `pnpm build:ui` builds it with Vite and embeds the
+  bundle into `src/generated/report-assets.ts` (auto-generated, never
+  hand-edited); `src/report-shell.ts` inlines it into each self-contained
+  report file with the data as JSON. Derivation logic and terminology the
+  UI shares with node-side tests live in `src/report-model.ts` and
+  `src/report-terms.ts` - presentation belongs in `report-ui/`, logic
+  does not. UI typechecks via `tsc -p report-ui`; UI tests live in
+  `tests/ui/` (jsdom).
 
 ## Conventions
 

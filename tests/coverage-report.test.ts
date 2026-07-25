@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeCoverage } from "../src/coverage.js";
 import { renderCoverageReport } from "../src/coverage-report.js";
 import type { ReadyDiscoveredSkill } from "../src/discovery.js";
+import { PAYLOAD_GLOBAL } from "../src/report-payload.js";
 
 const context = { generatedAt: "2026-07-25T00:00:00.000Z" };
 
@@ -19,83 +20,36 @@ function skill(name: string, cases: ReadyDiscoveredSkill["evals"]["cases"]): Rea
   };
 }
 
-const report = computeCoverage([
-  skill("observability", [
-    {
-      arms: ["solo", "baseline"],
-      assert: { command_exit: { command: "true" } },
-      id: "typed-errors",
-      mode: "generation",
-      prompt: "p",
-    },
-    { id: "fires", mode: "trigger", prompt: "p", should_trigger: true },
-  ]),
-]);
-
 describe("renderCoverageReport", () => {
+  const report = computeCoverage([
+    skill("observability", [{ id: "fires", mode: "trigger", prompt: "p", should_trigger: true }]),
+  ]);
   const html = renderCoverageReport(report, context);
 
-  it("gives every composition segment a tooltip explaining its rung", () => {
-    // Both the hover tooltip (data-tip) and the accessible name carry the rung, the share, and
-    // what the rung proves - the bar is readable without the legend.
-    expect(html).toContain('data-tip="execution - 1 of 2 cases (50%). Runtime behavior');
-    expect(html).toContain(
-      'data-tip="trigger-only - 1 of 2 cases (50%). Proves invocation behavior',
-    );
-    expect(html).toMatch(/aria-label="execution - 1 of 2 cases/);
-    // Segments are keyboard-reachable so the tooltip is not hover-only.
-    expect(html).toContain('tabindex="0"');
-  });
-
-  it("renders the matrix row and case detail", () => {
-    expect(html).toContain("observability");
-    expect(html).toContain("typed-errors");
-    expect(html).toContain("command_exit");
-    expect(html).toContain("solo+baseline");
-    // The rule column carries the audit's unit of account.
-    expect(html).toContain("<th>Rule</th>");
-  });
-
-  it("renders discovery diagnostics and an explicit empty state", () => {
-    const empty = renderCoverageReport(computeCoverage([], ["/roots/gone"]), context);
-    expect(empty).toContain("No ready skills discovered");
-    expect(empty).toContain("missing root");
-    expect(empty).toContain("/roots/gone");
-    expect(empty).not.toContain("every skill");
-  });
-
-  it("renders the report nav with Coverage active and a link to the run report", () => {
-    expect(html).toContain('<span class="tab tab-active" aria-current="page">Coverage</span>');
-    expect(html).toContain('<a class="tab" href="latest.html">Latest run</a>');
-  });
-
-  it("opens with a collapsed primer that teaches the grader ladder", () => {
-    expect(html).toContain('<details class="primer">');
-    expect(html).toContain('class="primer-body"');
-    expect(html).toContain("Every dotted term on this page opens a refresher.");
-  });
-
-  it("weaves term buttons into the prose and appends the quick-view panels", () => {
-    expect(html).toContain('popovertarget="term-regex"');
-    expect(html).toContain('popovertarget="term-baseline"');
-    expect(html).toContain('id="term-regex"');
-  });
-
-  it("is a self-contained document with no scripts or external assets", () => {
+  it("renders a self-contained shell hydrating the embedded app", () => {
     expect(html.startsWith("<!doctype html>")).toBe(true);
-    expect(html).toContain("<style>");
-    expect(html).not.toMatch(/<script/i);
-    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).toContain("<title>skillval coverage</title>");
+    expect(html).toContain('<div id="root"></div>');
+    expect(html).toContain(`window.${PAYLOAD_GLOBAL} =`);
+    expect(html).toContain('"kind":"coverage"');
+    expect(html).not.toMatch(/src="https?:|href="https?:/);
   });
 
-  it("escapes untrusted names so a skill name cannot inject markup", () => {
-    const hostile = computeCoverage([
-      skill('<img src=x onerror="1">', [
-        { id: "case", mode: "trigger", prompt: "p", should_trigger: true },
+  it("embeds the coverage data for the app to render", () => {
+    expect(html).toContain('"observability"');
+    expect(html).toContain('"skillCount":1');
+  });
+
+  it("keeps hostile skill names inert inside the data script", () => {
+    const hostile = renderCoverageReport(
+      computeCoverage([
+        skill("</script><img src=x onerror=alert(1)>", [
+          { id: "case", mode: "trigger", prompt: "p", should_trigger: true },
+        ]),
       ]),
-    ]);
-    const rendered = renderCoverageReport(hostile, context);
-    expect(rendered).not.toContain("<img src=x");
-    expect(rendered).toContain("&lt;img src=x");
+      context,
+    );
+    expect(hostile).not.toContain("</script><img");
+    expect(hostile).toContain("\\u003c/script\\u003e");
   });
 });
