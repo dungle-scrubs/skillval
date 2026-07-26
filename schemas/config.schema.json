@@ -35,6 +35,24 @@
       },
       "description": "Named skill sets: loadout name to the skill names it contains."
     },
+    "profile": {
+      "type": "object",
+      "required": ["targets"],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "description": "Executor identities you run, e.g. claude/sonnet/low. A rule is a prune candidate only when it is a no-op across ALL of them.",
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
     "projects": {
       "type": "array",
       "items": {

@@ -67,6 +67,8 @@ export function loadConfig(path: string, home = homedir()): SkillvalConfig {
     ...(parsed.exclude === undefined ? {} : { exclude: parsed.exclude }),
     ...(parsed.htmlReport === undefined ? {} : { htmlReport: parsed.htmlReport }),
     ...(parsed.loadouts === undefined ? {} : { loadouts: parsed.loadouts }),
+    // Carried verbatim: executor identities are opaque strings the ledger matches against.
+    ...(parsed.profile === undefined ? {} : { profile: parsed.profile }),
     ...(parsed.projects === undefined
       ? {}
       : { projects: parsed.projects.map((project) => expandRoot(project, home)) }),

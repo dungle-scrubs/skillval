@@ -15,7 +15,13 @@ import {
   discoveryReport,
   projectDiscoveryReport,
 } from "./discovery.js";
-import { buildLedger, type LedgerReport, transitions } from "./ledger.js";
+import {
+  buildLedger,
+  type LedgerReport,
+  type Recommendation,
+  recommendFor,
+  transitions,
+} from "./ledger.js";
 import type { ArmPlan, RunPlan } from "./runner.js";
 import { planEvaluation, routeRunTargets, runEvaluation } from "./runner.js";
 
@@ -30,6 +36,7 @@ interface ListOptions {
 
 interface LedgerOptions {
   readonly json?: boolean;
+  readonly pruneCandidates?: boolean;
   readonly transitions?: boolean;
 }
 
@@ -258,14 +265,27 @@ program
   )
   .option("--json", "return the ledger as JSON")
   .option("--transitions", "show only cases whose verdict differs across identities")
-  .action((options: LedgerOptions): void => {
+  .option("--prune-candidates", "show only rules that are dead weight for your profile")
+  .action((options: LedgerOptions, command: Command): void => {
+    const globalOptions = command.optsWithGlobals() as GlobalOptions & LedgerOptions;
+    const targets = loadConfig(resolveConfigPath({ cliPath: globalOptions.config })).profile
+      ?.targets;
     const ledger = buildLedger(join(resolveStateDirectory(), "reports"), new Date().toISOString());
-    const rows = options.transitions === true ? transitions(ledger) : ledger.rows;
+    let rows = options.transitions === true ? transitions(ledger) : ledger.rows;
+    if (options.pruneCandidates === true) {
+      rows = rows.filter((row) => recommendFor(row, targets) === "prune-candidate");
+    }
     if (options.json === true) {
-      console.log(JSON.stringify({ ...ledger, rows }, null, 2));
+      const withAdvice = rows.map((row) => ({
+        ...row,
+        recommendation: recommendFor(row, targets),
+      }));
+      console.log(
+        JSON.stringify({ ...ledger, profile: targets ?? null, rows: withAdvice }, null, 2),
+      );
       return;
     }
-    printLedger(ledger, rows);
+    printLedger(ledger, rows, targets);
   });
 
 // Opening the report is a convenience, never a failure mode: a headless or unusual environment
@@ -303,7 +323,17 @@ const LEDGER_SHORT: Readonly<Record<string, string>> = {
   unknown: "?",
 };
 
-function printLedger(ledger: LedgerReport, rows: readonly LedgerReport["rows"][number][]): void {
+const RECOMMENDATION_SHORT: Readonly<Record<Recommendation, string>> = {
+  "insufficient-evidence": "?",
+  keep: "keep",
+  "prune-candidate": "PRUNE",
+};
+
+function printLedger(
+  ledger: LedgerReport,
+  rows: readonly LedgerReport["rows"][number][],
+  targets: readonly string[] | undefined,
+): void {
   if (ledger.executors.length === 0) {
     console.log("no reports yet - run a suite first");
     return;
@@ -314,20 +344,26 @@ function printLedger(ledger: LedgerReport, rows: readonly LedgerReport["rows"][n
     width: Math.max(6, identity.length),
   }));
   const header = columns.map((column) => column.identity.padEnd(column.width)).join("  ");
-  console.log(`${"case".padEnd(caseWidth)}  ${header}`);
+  console.log(`${"case".padEnd(caseWidth)}  ${header}  verdict`);
   for (const row of rows) {
     const cells = columns
       .map((column) =>
         (LEDGER_SHORT[row.cells[column.identity]?.verdict ?? ""] ?? "").padEnd(column.width),
       )
       .join("  ");
-    console.log(`${`${row.skill}/${row.caseId}`.padEnd(caseWidth)}  ${cells}`);
+    const advice = RECOMMENDATION_SHORT[recommendFor(row, targets)];
+    console.log(`${`${row.skill}/${row.caseId}`.padEnd(caseWidth)}  ${cells}  ${advice}`);
   }
   console.log(
     "\nLOAD load-bearing (skill changed behavior) - noop control passed too - FAIL graded failure",
   );
   console.log(
     "---- skill never invoked (a floor on loading, not a judgment) - inco infrastructure - pass trigger-only",
+  );
+  console.log(
+    targets === undefined || targets.length === 0
+      ? "verdict weighs EVERY identity on record - set profile.targets to weigh only the tiers you run"
+      : `verdict weighs your profile: ${targets.join(", ")}`,
   );
   console.log(`${rows.length} case(s) across ${ledger.executors.length} executor identity(ies)`);
 }
