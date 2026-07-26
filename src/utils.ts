@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { EVAL_DEFINITION_FILE } from "./executors/seed.js";
 
 export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
@@ -59,10 +60,13 @@ export function walkFiles(root: string): string[] {
   return files.sort();
 }
 
+// Hashes what a trial can actually SEE, which is why the eval definition is excluded: it is never
+// seeded (see stageSkill), and counting it would also bust every cached arm of a skill whenever any
+// one of its cases is edited - the case JSON already keys each case's own arms.
 export function skillContentHash(skillDirectory: string): string {
-  const parts = walkFiles(skillDirectory).map(
-    (file) => `${relative(skillDirectory, file)}\n${readFileSync(file, "utf8")}`,
-  );
+  const parts = walkFiles(skillDirectory)
+    .filter((file) => relative(skillDirectory, file) !== EVAL_DEFINITION_FILE)
+    .map((file) => `${relative(skillDirectory, file)}\n${readFileSync(file, "utf8")}`);
   return sha256(parts.join("\0"));
 }
 

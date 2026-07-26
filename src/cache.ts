@@ -15,7 +15,9 @@ import { sha256 } from "./utils.js";
 //     cached should_trigger results could decode differently.
 // 16: provider-availability failures (quota, rate limit, auth) classify as infrastructure
 //     instead of content run-failures, so such trials change outcome and must not be reused.
-export const RUNNER_VERSION = 16;
+// 17: skills are staged without their eval definition, so a target-present arm can no longer read
+//     its own prompts and asserts - an asymmetric leak that inflated load-bearing verdicts.
+export const RUNNER_VERSION = 17;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
