@@ -15,6 +15,7 @@ import {
   discoveryReport,
   projectDiscoveryReport,
 } from "./discovery.js";
+import { buildLedger, type LedgerReport, transitions } from "./ledger.js";
 import type { ArmPlan, RunPlan } from "./runner.js";
 import { planEvaluation, routeRunTargets, runEvaluation } from "./runner.js";
 
@@ -24,6 +25,11 @@ interface GlobalOptions {
 
 interface ListOptions {
   readonly json?: boolean;
+}
+
+interface LedgerOptions {
+  readonly json?: boolean;
+  readonly transitions?: boolean;
 }
 
 interface RunCommandOptions {
@@ -239,6 +245,23 @@ program
     }
   });
 
+program
+  .command("ledger")
+  .description(
+    "Cross-run verdict matrix: one row per case, one column per executor identity (name/model/effort), read from existing reports without spending trials",
+  )
+  .option("--json", "return the ledger as JSON")
+  .option("--transitions", "show only cases whose verdict differs across identities")
+  .action((options: LedgerOptions): void => {
+    const ledger = buildLedger(join(resolveStateDirectory(), "reports"), new Date().toISOString());
+    const rows = options.transitions === true ? transitions(ledger) : ledger.rows;
+    if (options.json === true) {
+      console.log(JSON.stringify({ ...ledger, rows }, null, 2));
+      return;
+    }
+    printLedger(ledger, rows);
+  });
+
 // Opening the report is a convenience, never a failure mode: a headless or unusual environment
 // simply keeps the printed path. The child is detached and unref'd so the CLI can exit immediately.
 function openInBrowser(path: string): void {
@@ -260,6 +283,47 @@ export async function main(): Promise<void> {
     console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   }
+}
+
+// Verdicts are abbreviated so a dozen identities still fit a terminal; the legend prints with the
+// table because an unexplained two-letter grid is not a report.
+const LEDGER_SHORT: Readonly<Record<string, string>> = {
+  fail: "FAIL",
+  inconclusive: "inco",
+  "load-bearing": "LOAD",
+  "no-op": "noop",
+  "not-invoked": "----",
+  pass: "pass",
+  unknown: "?",
+};
+
+function printLedger(ledger: LedgerReport, rows: readonly LedgerReport["rows"][number][]): void {
+  if (ledger.executors.length === 0) {
+    console.log("no reports yet - run a suite first");
+    return;
+  }
+  const caseWidth = Math.max(20, ...rows.map((row) => `${row.skill}/${row.caseId}`.length));
+  const columns = ledger.executors.map((identity) => ({
+    identity,
+    width: Math.max(6, identity.length),
+  }));
+  const header = columns.map((column) => column.identity.padEnd(column.width)).join("  ");
+  console.log(`${"case".padEnd(caseWidth)}  ${header}`);
+  for (const row of rows) {
+    const cells = columns
+      .map((column) =>
+        (LEDGER_SHORT[row.cells[column.identity]?.verdict ?? ""] ?? "").padEnd(column.width),
+      )
+      .join("  ");
+    console.log(`${`${row.skill}/${row.caseId}`.padEnd(caseWidth)}  ${cells}`);
+  }
+  console.log(
+    "\nLOAD load-bearing (skill changed behavior) - noop control passed too - FAIL graded failure",
+  );
+  console.log(
+    "---- skill never invoked (a floor on loading, not a judgment) - inco infrastructure - pass trigger-only",
+  );
+  console.log(`${rows.length} case(s) across ${ledger.executors.length} executor identity(ies)`);
 }
 
 function printPlan(plan: RunPlan): void {

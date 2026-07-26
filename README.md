@@ -371,6 +371,32 @@ compare against a baseline arm. The page shares the run report's two-tab nav, li
 the mechanical half of the bundled skill's audit (its "read what is graded" step); the judgment
 half - what is worth writing next - stays with [the skill](#bundled-skill).
 
+## The ledger
+
+A report answers "what happened in this run". `skillval ledger` answers the question the suite
+exists for: **which rules still earn their keep, on which model, at which effort.** It reads every
+report already on disk - no trials are spent - and renders one row per case, one column per
+executor identity (name/model/thinking, exactly the fields the cache keys on, so the columns are
+the units whose verdicts are comparable).
+
+```console
+$ skillval ledger --transitions
+case                                claude/sonnet/low  claude/sonnet/high  codex/gpt-5.6-sol/medium
+standards-python/ty-over-mypy       ----               LOAD                noop
+observability/boundary-tracing      noop               LOAD                LOAD
+```
+
+`--transitions` shows only the rows whose verdict differs across identities, which is where the
+information is: a rule that is load-bearing at one tier and a no-op at another has a **scope**, not
+a defect, and the matrix is what tells you which tiers still need it.
+
+Two verdicts exist so that a run's non-results cannot masquerade as findings. `----` means the
+skill was never invoked - a floor on *loading* it, not a judgment about the rule, and a no-op
+recorded below that floor means nothing because the `solo` arm never read the skill. `inco` means
+the trial was never graded at all: an executor crash, a timeout, or a provider outage. Any failing
+`run` check is read this way, which also repairs history written before provider failures were
+typed as infrastructure.
+
 ## Trust model
 
 A `skillval.yml` is executable input, not passive configuration. Two fields run case-authored
