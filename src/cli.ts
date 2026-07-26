@@ -25,6 +25,7 @@ interface GlobalOptions {
 
 interface ListOptions {
   readonly json?: boolean;
+  readonly open?: boolean;
 }
 
 interface LedgerOptions {
@@ -42,6 +43,7 @@ interface RunCommandOptions {
   readonly json?: boolean;
   readonly loadout?: string;
   readonly model?: string;
+  readonly open?: boolean;
   readonly skipBaseline?: boolean;
 }
 
@@ -79,6 +81,7 @@ program
     "acknowledge that pi generation trials run without an OS sandbox",
   )
   .option("--json", "return the complete report as JSON")
+  .option("--open", "open the HTML report in a browser when the run finishes")
   .action((targets: string[], options: RunCommandOptions, command: Command): void => {
     const globalOptions = command.optsWithGlobals() as GlobalOptions & RunCommandOptions;
     const configPath = resolveConfigPath({ cliPath: globalOptions.config });
@@ -118,7 +121,9 @@ program
       console.log(`report: ${outcome.reportPath}`);
       if (outcome.htmlReportPath !== undefined) {
         console.log(`html: ${outcome.htmlReportPath}`);
-        openInBrowser(outcome.htmlReportPath);
+        // Only on request. A sweep is many runs, and hijacking the browser once per run makes
+        // batch work unusable; the path above is enough to open one deliberately.
+        if (options.open === true) openInBrowser(outcome.htmlReportPath);
       }
       if (outcome.noops > 0) {
         console.log(
@@ -205,6 +210,7 @@ program
     "Render an eval-coverage matrix of every ready skill: cases per skill by grader rung (trigger-only, regex, execution)",
   )
   .option("--json", "return the coverage report as JSON instead of writing the HTML page")
+  .option("--open", "open the rendered matrix in a browser")
   .action((options: ListOptions, command: Command): void => {
     const globalOptions = command.optsWithGlobals() as GlobalOptions & ListOptions;
     const configPath = resolveConfigPath({ cliPath: globalOptions.config });
@@ -234,7 +240,7 @@ program
     );
     renameSync(stagingPath, htmlPath);
     console.log(`coverage: ${htmlPath}`);
-    openInBrowser(htmlPath);
+    if (options.open === true) openInBrowser(htmlPath);
     for (const root of report.missingRoots) console.log(`missing root: ${root}`);
     for (const skill of report.skipped) {
       console.log(
