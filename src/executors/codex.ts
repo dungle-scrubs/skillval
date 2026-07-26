@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
 import { stageSkill } from "./seed.js";
-import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
+import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -88,13 +88,17 @@ export class CodexExecutor implements Executor {
       command: "codex",
       env: environment,
     });
+    const trace = parseCodexTrace(result.stdout, request.skillName);
     if (result.status !== 0) {
       // Quota/auth refusals arrive on stdout as turn.failed events; check both streams.
       throwIfProviderUnavailable("codex", `${result.stderr}\n${result.stdout.slice(-2000)}`);
-      throw new Error(`codex exec exited ${result.status}: ${result.stderr.slice(-500)}`);
+      // A nonzero exit that still completed its turn is a gradeable answer; one that did not
+      // graded nothing, and must not be recorded as a content FAIL.
+      if (!trace.completed)
+        throwNeverGraded("codex exec", result.status, result.signal, result.stderr.slice(-500));
     }
 
-    return parseCodexTrace(result.stdout, request.skillName);
+    return trace;
   }
 }
 

@@ -17,7 +17,10 @@ import { sha256 } from "./utils.js";
 //     instead of content run-failures, so such trials change outcome and must not be reused.
 // 17: skills are staged without their eval definition, so a target-present arm can no longer read
 //     its own prompts and asserts - an asymmetric leak that inflated load-bearing verdicts.
-export const RUNNER_VERSION = 17;
+// 18: an agent CLI exiting nonzero WITHOUT completing a turn is infrastructure, not a content
+//     failure. Version 16 only caught provider failures that announce themselves in text; an exit
+//     with an empty stderr announced nothing and was cached as a FAIL the model never earned.
+export const RUNNER_VERSION = 18;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

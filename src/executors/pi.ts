@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, pathTargetsSkillMarkdown } from "../utils.js";
 import { stageSkill } from "./seed.js";
-import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
+import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -154,8 +154,10 @@ export class PiExecutor implements Executor {
       // typed ExecutorInfraError inside spawnAgent, so this only sees genuine agent-side failures.
       const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
       throwIfProviderUnavailable("pi", `${result.stderr}\n${result.stdout.slice(-2000)}`);
-      const how = result.signal !== null ? `killed by ${result.signal}` : `exited ${result.status}`;
-      throw new Error(`pi -p ${how}: ${detail}`);
+      // A nonzero exit or signal that still completed its turn is gradeable; otherwise nothing was
+      // graded and the trial is infrastructure, not a verdict about the skill.
+      if (!parsePiTrace(result.stdout, request.skillName).completed)
+        throwNeverGraded("pi -p", result.status, result.signal, detail);
     }
 
     const trace = parsePiTrace(result.stdout, request.skillName);
