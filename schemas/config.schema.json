@@ -6,6 +6,12 @@
       "enum": ["claude", "codex", "pi"],
       "description": "Trial executor."
     },
+    "effort": {
+      "type": "string",
+      "description": "Effort/thinking level for every run, e.g. low. Pins the ledger identity; --effort overrides it.",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
     "exclude": {
       "type": "array",
       "items": {
@@ -19,6 +25,12 @@
     "htmlReport": {
       "type": "boolean",
       "description": "Write and open a self-contained HTML report after each run. Enabled when omitted."
+    },
+    "model": {
+      "type": "string",
+      "description": "Model for every run, e.g. sonnet. Pins the ledger identity so runs stay comparable; --model overrides it.",
+      "minLength": 1,
+      "pattern": "\\S"
     },
     "loadouts": {
       "type": "object",

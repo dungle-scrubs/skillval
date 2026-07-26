@@ -62,7 +62,11 @@ export function loadConfig(path: string, home = homedir()): SkillvalConfig {
   }
 
   return {
+    // Pinned identity: without these the executor falls back to the agent CLI's own configured
+    // model, so the ledger column a run lands in depends on the user's current session settings.
+    ...(parsed.effort === undefined ? {} : { effort: parsed.effort }),
     executor: parsed.executor,
+    ...(parsed.model === undefined ? {} : { model: parsed.model }),
     // Exclusions match skill names, not paths, so they are carried through verbatim.
     ...(parsed.exclude === undefined ? {} : { exclude: parsed.exclude }),
     ...(parsed.htmlReport === undefined ? {} : { htmlReport: parsed.htmlReport }),
