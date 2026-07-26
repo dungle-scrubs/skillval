@@ -240,12 +240,19 @@ a suite of untrustworthy tests is a worse starting point than a thin one.
 - **It is narrower than the language.** A correct implementation spells the
   behavior a way the pattern does not admit. Recurring families, all
   observed: typography (a model writes a curly apostrophe, the pattern has
-  an ASCII one), type arguments (`fn($$$A)` does not match `fn<T>($$$A)`),
-  namespacing and aliasing (`React.useState`, `useState as useLocal`), and
-  wrapping (`await`, optional chaining). Tell: the pattern encodes one
-  spelling of a behavior that has several. Fix: alternate over the real
-  forms - and prefer a structural rule, which is spelling-agnostic by
-  construction.
+  an ASCII one), **capitalization** (skillval compiles patterns with `m`
+  only, never `i`, so `\bty\b` misses an answer that opens "Ty."), type
+  arguments (`fn($$$A)` does not match `fn<T>($$$A)`), namespacing and
+  aliasing (`React.useState`, `useState as useLocal`), and wrapping
+  (`await`, optional chaining). Tell: the pattern encodes one spelling of a
+  behavior that has several. Fix: alternate over the real forms - and
+  prefer a structural rule, which is spelling-agnostic by construction.
+  The discriminator for capitalization: a **code literal** (`pull_request`,
+  `NPM_CONFIG_PROVENANCE`, `codex exec`) is legitimately case-sensitive and
+  must stay exact, but a **prose word** the model writes in a sentence
+  (`ty`, `payoff`, `planner`) needs a class - it will eventually appear
+  title-cased. Loosening a code literal is its own defect: it invites the
+  false pass.
 - **It is broader than the behavior.** A single common word, or a pattern
   a comment satisfies. Tell: you can write a file that matches while doing
   nothing the skill teaches. Fix: climb a rung - structure and execution
