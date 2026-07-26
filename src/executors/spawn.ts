@@ -37,6 +37,13 @@ export class ExecutorInfraError extends Error {
 const PROVIDER_UNAVAILABLE_PATTERN =
   /usage limit|rate.?limit(ed)?|quota exceeded|too many requests|insufficient credit|purchase more credits|billing|invalid api key|no api key|not authenticated|401 unauthorized/i;
 
+// Whether text carries a provider-availability signature. Exported because reports written before
+// provider failures were classified as infrastructure still contain them as content failures, and
+// a reader of that history must not present them as verdicts.
+export function isProviderUnavailable(output: string): boolean {
+  return PROVIDER_UNAVAILABLE_PATTERN.test(output);
+}
+
 // Classifies a failed spawn's output: a provider-availability failure throws the typed infra
 // error; anything else returns so the executor raises its own descriptive error.
 export function throwIfProviderUnavailable(command: string, output: string): void {
