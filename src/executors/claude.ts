@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
 import { stageSkill } from "./seed.js";
-import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
+import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
 import {
   assertEffortSupported,
   type Executor,
@@ -77,12 +77,17 @@ export class ClaudeExecutor implements Executor {
       cwd: request.workspace,
       env: environment,
     });
+    const trace = parseClaudeTrace(result.stdout, request.skillName);
     if (result.status !== 0) {
       throwIfProviderUnavailable("claude", `${result.stderr}\n${result.stdout.slice(-2000)}`);
-      throw new Error(`claude -p exited ${result.status}: ${result.stderr.slice(-500)}`);
+      // Grade a nonzero exit only when the turn actually completed; otherwise nothing was graded
+      // and the trial is infrastructure. Observed live on opus, which exits 1 with an EMPTY stderr
+      // often enough that the old path recorded a run of real answers as a failing arm.
+      if (!trace.completed)
+        throwNeverGraded("claude -p", result.status, result.signal, result.stderr.slice(-500));
     }
 
-    return parseClaudeTrace(result.stdout, request.skillName);
+    return trace;
   }
 }
 

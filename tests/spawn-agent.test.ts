@@ -4,6 +4,7 @@ import {
   ExecutorInfraError,
   spawnAgent,
   throwIfProviderUnavailable,
+  throwNeverGraded,
 } from "../src/executors/spawn.js";
 
 // Drive a real child (node) rather than a real agent CLI: the classification logic under test is
@@ -91,5 +92,29 @@ describe("throwIfProviderUnavailable", () => {
       throwIfProviderUnavailable("codex", "error: model refused to complete the task"),
     ).not.toThrow();
     expect(() => throwIfProviderUnavailable("pi", "TypeError: x is not a function")).not.toThrow();
+  });
+});
+
+describe("throwNeverGraded", () => {
+  it("names the exit status, the signal, and an empty stderr", () => {
+    // The exact live shape that motivated this path: opus exiting 1 with nothing on stderr. The
+    // message has to say something, or the ledger shows a blank reason for a discarded trial.
+    expect(() => throwNeverGraded("claude -p", 1, null, "")).toThrow(
+      /claude -p exited 1 without completing a turn: \(no output\)/,
+    );
+    expect(() => throwNeverGraded("pi -p", null, "SIGKILL", "oom")).toThrow(
+      /pi -p died on SIGKILL without completing a turn: oom/,
+    );
+  });
+
+  it("is typed as infrastructure so the runner excludes it from the vote and never caches it", () => {
+    let thrown: unknown;
+    try {
+      throwNeverGraded("claude -p", 1, null, "");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
+    expect((thrown as ExecutorInfraError).kind).toBe("process-failed");
   });
 });

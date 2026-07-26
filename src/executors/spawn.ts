@@ -16,13 +16,14 @@ export const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 // unrelated to whether the skill works - output too large to buffer, wall-clock budget exceeded,
 // or the provider refusing to serve at all (quota, rate limit, auth). The runner records it under
 // a dedicated check name so it is never confused with a graded skill result, excludes it from the
-// vote, and never caches it. An ordinary nonzero agent exit stays a per-executor error.
+// vote, and never caches it. A nonzero agent exit counts as a graded result only when the trace
+// shows a completed turn; an exit that completed nothing is infrastructure too (throwNeverGraded).
 export class ExecutorInfraError extends Error {
-  public readonly kind: "output-too-large" | "provider-unavailable" | "timeout";
+  public readonly kind: "output-too-large" | "process-failed" | "provider-unavailable" | "timeout";
 
   public constructor(
     message: string,
-    kind: "output-too-large" | "provider-unavailable" | "timeout",
+    kind: "output-too-large" | "process-failed" | "provider-unavailable" | "timeout",
   ) {
     super(message);
     this.kind = kind;
@@ -54,6 +55,29 @@ export function throwIfProviderUnavailable(command: string, output: string): voi
       "provider-unavailable",
     );
   }
+}
+
+/**
+ * Raised when an agent CLI exits nonzero WITHOUT completing a turn.
+ *
+ * The discriminator is the trace, not the exit status. A CLI that dies after the model finished
+ * still holds a real answer, and that answer is gradeable - the trial earned its verdict. A CLI
+ * that dies before completing a turn graded nothing at all, so calling it a content FAIL invents a
+ * verdict out of a crash and then caches it. That is the same defect that recorded 29 trials as
+ * false FAILs during a provider outage; the signature-matching fix above only ever covered the
+ * failures that announce themselves, and an exit with an empty stderr announces nothing.
+ */
+export function throwNeverGraded(
+  command: string,
+  status: number | null,
+  signal: string | null,
+  detail: string,
+): never {
+  const how = signal === null ? `exited ${status}` : `died on ${signal}`;
+  throw new ExecutorInfraError(
+    `${command} ${how} without completing a turn: ${detail.trim() || "(no output)"}`,
+    "process-failed",
+  );
 }
 
 export interface AgentProcessResult {
