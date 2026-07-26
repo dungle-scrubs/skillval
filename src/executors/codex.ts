@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
+import { stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
 import {
   assertEffortSupported,
@@ -123,7 +124,9 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): v
   const skillsRoot = join(workspace, ".agents/skills");
   mkdirSync(skillsRoot, { recursive: true });
   for (const skill of skills) {
-    symlinkSync(skill.directory, join(skillsRoot, skill.name));
+    // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
+    // the arm being graded (see stageSkill).
+    stageSkill(skillsRoot, skill.name, skill.directory);
   }
 }
 

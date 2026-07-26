@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, pathTargetsSkillMarkdown } from "../utils.js";
+import { stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
 import {
   assertEffortSupported,
@@ -34,9 +35,18 @@ export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = 
 // seeds exactly this arm's set on top. pi loads explicit --skill paths even under --no-skills
 // (verified against pi's resource loader), so the empty baseline sees no skills and the solo arm
 // sees only the target.
-export function piSkillArgs(seededSkills: readonly SeededSkill[]): string[] {
+export function piSkillArgs(seededSkills: readonly SeededSkill[], stagingRoot?: string): string[] {
   const args = ["--no-skills"];
-  for (const skill of seededSkills) args.push("--skill", skill.directory);
+  for (const skill of seededSkills) {
+    // pi loads a skill from a directory path, so the path handed over must be a staged copy that
+    // omits the eval definition - otherwise the graded arm can read its own answer key.
+    args.push(
+      "--skill",
+      stagingRoot === undefined
+        ? skill.directory
+        : stageSkill(stagingRoot, skill.name, skill.directory),
+    );
+  }
   return args;
 }
 
@@ -100,7 +110,9 @@ export class PiExecutor implements Executor {
     seedInstruction(request.workspace, request.seededInstruction);
     // Clean skill loading (see piSkillArgs): --no-skills hides the user's library, --skill seeds
     // this arm's set. Instruction-file isolation is handled separately, below.
-    const arm = piSkillArgs(request.seededSkills);
+    const skillStaging = join(request.workspace, ".skillval-skills");
+    mkdirSync(skillStaging, { recursive: true });
+    const arm = piSkillArgs(request.seededSkills, skillStaging);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
     const selection: string[] = [];
     if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);

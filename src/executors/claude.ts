@@ -1,17 +1,11 @@
 /** Implements Claude Code-specific skill seeding, config isolation, invocation, and parsing. */
 import { spawnSync } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
+import { stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable } from "./spawn.js";
 import {
   assertEffortSupported,
@@ -103,7 +97,9 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): v
   const skillsRoot = join(workspace, ".claude/skills");
   mkdirSync(skillsRoot, { recursive: true });
   for (const skill of skills) {
-    symlinkSync(skill.directory, join(skillsRoot, skill.name));
+    // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
+    // the arm being graded (see stageSkill).
+    stageSkill(skillsRoot, skill.name, skill.directory);
   }
 }
 

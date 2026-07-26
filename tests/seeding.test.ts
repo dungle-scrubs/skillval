@@ -1,4 +1,13 @@
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,20 +38,35 @@ describe.each([
   ["codex", seedCodexSkills, ".agents/skills"],
   ["claude", seedClaudeSkills, ".claude/skills"],
 ])("%s seedSkills", (_name, seedSkills, skillsSubdir) => {
-  it("symlinks every seeded skill into the skills root", () => {
+  it("stages every seeded skill into the skills root, contents linked to the real files", () => {
     const workspace = makeDir();
     const skillA = makeDir();
     const skillB = makeDir();
+    writeFileSync(join(skillA, "SKILL.md"), "# alpha\n");
+    writeFileSync(join(skillB, "SKILL.md"), "# beta\n");
 
     seedSkills(workspace, [
       { directory: skillA, name: "alpha" },
       { directory: skillB, name: "beta" },
     ]);
 
+    // The seeded entry is a staged directory, not a link to the skill itself: linking the skill
+    // wholesale would carry its eval definition into the arm being graded.
     const root = join(workspace, skillsSubdir);
-    expect(lstatSync(join(root, "alpha")).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(root, "alpha"))).toBe(skillA);
-    expect(readlinkSync(join(root, "beta"))).toBe(skillB);
+    expect(lstatSync(join(root, "alpha")).isDirectory()).toBe(true);
+    expect(readlinkSync(join(root, "alpha", "SKILL.md"))).toBe(join(skillA, "SKILL.md"));
+    expect(readlinkSync(join(root, "beta", "SKILL.md"))).toBe(join(skillB, "SKILL.md"));
+  });
+
+  it("never carries the eval definition into a seeded arm", () => {
+    const workspace = makeDir();
+    const skill = makeDir();
+    writeFileSync(join(skill, "SKILL.md"), "# skill\n");
+    writeFileSync(join(skill, "skillval.yml"), "cases: [{ assert: { must_match: ['answer'] } }]\n");
+
+    seedSkills(workspace, [{ directory: skill, name: "alpha" }]);
+
+    expect(readdirSync(join(workspace, skillsSubdir, "alpha"))).toEqual(["SKILL.md"]);
   });
 
   it("seeds nothing for an empty list (the baseline arm)", () => {
