@@ -257,6 +257,21 @@ a suite of untrustworthy tests is a worse starting point than a thin one.
   a comment satisfies. Tell: you can write a file that matches while doing
   nothing the skill teaches. Fix: climb a rung - structure and execution
   cannot be satisfied by a comment.
+- **The trap fires on the correct answer's own vocabulary.** A
+  `must_not_match` banning the wrong approach's spelling, where a *right*
+  implementation has its own reason to write that same string. Observed:
+  a Swift case banned `isLoading: Bool` to catch boolean-flag state, and a
+  model that correctly modelled state as an enum added
+  `var isLoading: Bool { ... }` - a convenience *derived from* the enum -
+  on about one roll in three, failing BOTH arms. The case was measuring
+  nothing at every tier it ever ran at. This is the inverse of "narrower
+  than the language" and worse: the trap does not miss a correct spelling,
+  it **punishes correct output**. Tell: ask *does a correct implementation
+  have any reason to write the banned string?* If yes, the trap needs a
+  discriminator, not a longer alternation - here, requiring a **stored**
+  property (`(var|let) isLoading: Bool\s*(=|$)`), since a computed one is
+  followed by `{`. Signature to watch for in a run: **both arms failing the
+  same `must_not_match`**, which is almost never a real finding.
 - **The prompt leads the witness.** Naming the technique the case grades
   turns a disposition test into a compliance test, and both arms pass. Tell:
   the prompt contains the words the assert looks for. Fix: hold the
