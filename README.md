@@ -206,8 +206,10 @@ load-bearing term is a dotted quick-view that opens a right-side explainer, and 
 with a collapsed 20-second primer - the reports assume a reader who has forgotten how skillval
 works and re-teach at point of use.
 
-Turn it off with `htmlReport: false` in the configuration - useful in CI or scripted runs. Failing
-to open a browser is never a run failure; the path is always printed.
+The report is written but not opened: pass `--open` to launch it, or open the printed path. A
+sweep is many runs, and hijacking the browser once per run makes batch work unusable. Turn the
+HTML off entirely with `htmlReport: false` in the configuration - useful in CI or scripted runs.
+Failing to open a browser is never a run failure; the path is always printed.
 
 ## Install
 
