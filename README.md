@@ -410,6 +410,15 @@ your tier. A rule that is load-bearing at high and a no-op at low is dead weight
 profile - correctly, since you never work where it helps. List every tier you actually use, not
 just your favourite one.
 
+That second shape is real rather than a quirk, because a verdict compares two arms and raising
+effort moves both. Usually the baseline **converges** on the rule's answer - the model reaches for
+it unaided once it thinks harder - so the rule is outgrown. But a baseline can also **diverge**: at
+low effort a model gives a short conventional answer that happens to match the house pick, and at
+high effort it deliberates, weighs the alternatives, and lands somewhere else that is defensible
+but is not your convention. More thinking means more considered alternatives, and your pick is only
+one of them - so a rule expressing a preference can become *more* necessary as the model improves,
+not less.
+
 A verdict of `not-invoked` or `inconclusive` is silence, not evidence: it can neither argue for
 keeping a rule nor for pruning it, and a row with nothing but silence reads as
 insufficient-evidence.
