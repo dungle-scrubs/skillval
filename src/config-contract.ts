@@ -9,6 +9,16 @@ export const configFileSchema = Type.ReadonlyObject(
     executor: Type.Enum(EXECUTOR_NAMES, {
       description: "Trial executor.",
     }),
+    // Pins the effort/thinking level every run uses, so a verdict is attributable. Overridden by
+    // --effort. See `model` for why pinning matters.
+    effort: Type.Optional(
+      Type.String({
+        description:
+          "Effort/thinking level for every run, e.g. low. Pins the ledger identity; --effort overrides it.",
+        minLength: 1,
+        pattern: String.raw`\S`,
+      }),
+    ),
     // Skill names to omit from discovery entirely, e.g. third-party skills installed under a root
     // you also own. Matched against the skill name with `*` and `?` glob wildcards.
     exclude: Type.Optional(
@@ -26,6 +36,18 @@ export const configFileSchema = Type.ReadonlyObject(
       Type.Boolean({
         description:
           "Write and open a self-contained HTML report after each run. Enabled when omitted.",
+      }),
+    ),
+    // Pins the model every run uses. Without this the claude executor takes its model from the
+    // user's own Claude Code settings, so switching session models silently changes which ledger
+    // column a run lands in - two runs meant to be compared end up measuring different models.
+    // Overridden by --model.
+    model: Type.Optional(
+      Type.String({
+        description:
+          "Model for every run, e.g. sonnet. Pins the ledger identity so runs stay comparable; --model overrides it.",
+        minLength: 1,
+        pattern: String.raw`\S`,
       }),
     ),
     // Named skill sets for loadout mode: each maps a loadout name to the skill names it contains.

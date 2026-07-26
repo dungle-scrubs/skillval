@@ -98,9 +98,10 @@ program
       allowShell: options.allowShell === true,
       allowUnsandboxedPi: options.allowUnsandboxedPi === true,
       caseFilter: options.case,
-      effort: options.effort,
+      // A flag beats the pinned config value, which beats the agent CLI's own default.
+      effort: options.effort ?? config.effort,
       loadout: options.loadout,
-      model: options.model,
+      model: options.model ?? config.model,
       requestedInstructions: requested.requestedInstructions,
       requestedSkills: requested.requestedSkills,
       skipBaseline: options.skipBaseline === true,

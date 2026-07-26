@@ -101,3 +101,39 @@ describe("configuration paths", () => {
     }
   });
 });
+
+describe("model and effort pinning", () => {
+  it("carries a pinned model and effort through to the loaded config", () => {
+    // Without pinning, the claude executor reads the user's own Claude Code settings, so switching
+    // session models silently moves a run into a different ledger column. Observed live: a study
+    // meant to compare trial counts compared two different models instead.
+    const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-pin-"));
+    const path = resolve(directory, "config.yml");
+    writeFileSync(path, "executor: claude\nmodel: sonnet\neffort: low\nroots: [~/skills]\n");
+
+    try {
+      expect(loadConfig(path, "/Users/example")).toEqual({
+        effort: "low",
+        executor: "claude",
+        model: "sonnet",
+        roots: ["/Users/example/skills"],
+      });
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("leaves both unset when unpinned, so the executor's own default still applies", () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "skillval-config-unpin-"));
+    const path = resolve(directory, "config.yml");
+    writeFileSync(path, "executor: claude\nroots: [~/skills]\n");
+
+    try {
+      const config = loadConfig(path, "/Users/example");
+      expect(config.model).toBeUndefined();
+      expect(config.effort).toBeUndefined();
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+});
