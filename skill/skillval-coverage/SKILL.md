@@ -272,6 +272,17 @@ a suite of untrustworthy tests is a worse starting point than a thin one.
   property (`(var|let) isLoading: Bool\s*(=|$)`), since a computed one is
   followed by `{`. Signature to watch for in a run: **both arms failing the
   same `must_not_match`**, which is almost never a real finding.
+- **The prompt suppresses the mechanism under test.** A cue meant to shape
+  the OUTPUT can silently switch off TOOL USE. Observed at scale: 29 trigger
+  cases ended with `Just answer.` / `Just answer, no files.`, and on claude at
+  low effort that cue stopped the model invoking the skill at all - 0/3 invoked
+  with it, 3/3 without, on two independent cases. Every "not invoked at low"
+  verdict on those cases was an artifact of the prompt, not a floor on loading.
+  The cue was also **redundant**: skillval runs trigger arms with
+  `--allowedTools Read,Glob,Grep,Skill`, so no file can be written whatever the
+  prompt says. Tell: ask *does this prompt instruct the model in a way that
+  could suppress the behavior being graded?* Fix: enforce shape through the
+  executor's tool allowlist, never through an instruction in the prompt.
 - **The prompt leads the witness.** Naming the technique the case grades
   turns a disposition test into a compliance test, and both arms pass. Tell:
   the prompt contains the words the assert looks for. Fix: hold the
