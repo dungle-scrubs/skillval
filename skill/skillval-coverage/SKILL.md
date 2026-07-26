@@ -70,10 +70,18 @@ candidate case before anything else.
    only a trigger case, and how many negatives exist - and on which rung each
    behavioral case sits (a regex-only case for a runtime behavior is itself a
    gap; see the ladder in the stopping rules).
-4. **Diff and rank.** The gap is rules taught with no behavioral case. Rank by
+4. **Audit the tests themselves.** Coverage counts cases; it says nothing
+   about whether they measure anything. Read each behavioral case against
+   the defect checklist in "Auditing the tests, not just the coverage" -
+   a case that cannot fail, cannot match, or is narrower than the language
+   is worse than a missing case, because it reports coverage you do not
+   have. An unrun case is unproven by definition: its assert has never met
+   real output.
+5. **Diff and rank.** The gap is rules taught with no behavioral case, plus
+   cases whose grading cannot be trusted. Rank by
    decay risk and decision value, **not** by which skills look thin (see the
    ranking rule below).
-5. **Guide the decisions.** For each real gap, walk the user through keep /
+6. **Guide the decisions.** For each real gap, walk the user through keep /
    write / skip using the stopping rules - and flag any rule that is really a
    deterministic check, which is better moved to a tested script than written as
    a case (see "When a rule belongs in a script" below). Then surface
@@ -213,6 +221,57 @@ and the trigger/boundary is pinned. Past that point, more cases are ceremony.
   remembering the no-op verdict is model-specific (confirm across the executors
   they actually use before pruning).
 
+## Auditing the tests, not just the coverage
+
+These defects are visible by READING the case - no run, no spend. Each has a
+tell you can check statically and a fix. Work them before proposing new cases:
+a suite of untrustworthy tests is a worse starting point than a thin one.
+
+- **It cannot fail.** The master filter. Tell: you cannot name output that
+  would fail this assert. A `must_match` on a word the prompt itself
+  guarantees, or on something every plausible answer contains. Fix:
+  re-key on what distinguishes the skill's answer, or retire the case.
+- **It cannot match.** The invisible one, because it looks like a skill
+  failure forever. Generation mode grades *produced files*; trigger mode
+  grades the *agent's text*. A generation case asserting on prose the model
+  only ever says can never match, and neither can an `ast` rule on a file
+  the prompt never asks for, or on an extension the grader does not parse.
+  Tell: mode and grader disagree about where the behavior lives.
+- **It is narrower than the language.** A correct implementation spells the
+  behavior a way the pattern does not admit. Recurring families, all
+  observed: typography (a model writes a curly apostrophe, the pattern has
+  an ASCII one), **capitalization** (skillval compiles patterns with `m`
+  only, never `i`, so `\bty\b` misses an answer that opens "Ty."), type
+  arguments (`fn($$$A)` does not match `fn<T>($$$A)`), namespacing and
+  aliasing (`React.useState`, `useState as useLocal`), and wrapping
+  (`await`, optional chaining). Tell: the pattern encodes one spelling of a
+  behavior that has several. Fix: alternate over the real forms - and
+  prefer a structural rule, which is spelling-agnostic by construction.
+  The discriminator for capitalization: a **code literal** (`pull_request`,
+  `NPM_CONFIG_PROVENANCE`, `codex exec`) is legitimately case-sensitive and
+  must stay exact, but a **prose word** the model writes in a sentence
+  (`ty`, `payoff`, `planner`) needs a class - it will eventually appear
+  title-cased. Loosening a code literal is its own defect: it invites the
+  false pass.
+- **It is broader than the behavior.** A single common word, or a pattern
+  a comment satisfies. Tell: you can write a file that matches while doing
+  nothing the skill teaches. Fix: climb a rung - structure and execution
+  cannot be satisfied by a comment.
+- **The prompt leads the witness.** Naming the technique the case grades
+  turns a disposition test into a compliance test, and both arms pass. Tell:
+  the prompt contains the words the assert looks for. Fix: hold the
+  technique out; ask for the ordinary task.
+- **The control is contaminated or vacuous.** A prompt naming the skill's
+  path lets `baseline` read it; a fixture that stages the expected answer
+  shows it to both arms; a trigger-only case has no behavioral check on
+  `peers`, so that arm passes vacuously. Tell: ask what the control arm
+  could possibly have done differently. Fix: name the skill, never a path;
+  stage only the task's inputs, never its answer.
+- **The verdict is unstable.** Behavior that flips between identical runs
+  graded at `trials: 1` is a coin toss recorded as a fact. Tell: repeated
+  runs disagree. Fix: raise `trials` to 3 on cases whose verdict drives a
+  decision - above 1, disagreement escalates automatically.
+
 ## Watching output: fixing ineffective tests
 
 After a run, the pass/fail column is not the finding - it is the *starting
@@ -258,6 +317,33 @@ Diagnose the category, then **propose** the adjustment with the `got:` evidence
 attached, so the user can see why. Apply on their confirmation; do not silently
 rewrite asserts. See [references/decisions.md](references/decisions.md) for the
 catalog of ineffective-test types and worked examples.
+
+## Confidence: what evidence licenses what action
+
+Every verdict carries a confidence, and the action it justifies is bounded by
+it. Reading a strong action off weak evidence is how a suite starts damaging
+the skills it was built to protect.
+
+| Evidence | Licenses |
+| --- | --- |
+| One trial, one model, regex-graded | Investigate. Never a prune, never a skill edit. |
+| Multiple trials, one model | A ledger entry for *that model*. |
+| Agreement across two model families | A prune proposal, for the user to decide. |
+| Execution or structural grading | Raises confidence a notch at any tier: it measures behavior or shape, not spelling. |
+| A failing arm whose `got:` shows correct output | An assert fix only. The ruler is broken, not the skill. |
+
+Two boundaries this table is drawing:
+
+- **A ruler defect is not a skill finding.** When the evidence says the
+  measurement was wrong, the only licensed change is to the measurement.
+  Editing the skill to satisfy a broken assert corrupts both.
+- **Effort and model tiers are routing data, not defects.** A rule that is
+  load-bearing at low reasoning effort and a no-op at high has not failed;
+  it has a scope. The useful output is which tiers still need it, not a
+  prune. Only a no-op that holds *across* tiers and models is dead weight.
+
+Where confidence is genuinely low, say so and name the cheapest experiment
+that would raise it - usually a second model, or three trials instead of one.
 
 ## Output
 

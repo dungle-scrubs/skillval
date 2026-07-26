@@ -144,6 +144,54 @@ nothing. Tell: it has never failed across runs, and you cannot name an input
 that would make it fail. Fix: restructure it around a behavior distinctive to
 the skill, or retire it (see "Why 'can it fail?' is the master filter").
 
+**Narrower than the language** - the commonest false fail, and the one that
+recurs. The behavior has several legal spellings and the pattern admits one.
+Four families, every one of them observed in this corpus:
+
+- *Typography.* A refusal pattern spelled `don'?t` with an ASCII apostrophe
+  fails a model that writes `don't` with U+2019. The refusal was correct; the
+  ruler was ASCII-only.
+- *Type arguments.* An ast pattern `useState(() => $$$B)` does not match
+  `useState<Config>(() => ...)`; the type-argument call is a different node
+  shape. This one bit three separate cases before it was internalized -
+  always alternate `fn($$$A)` with `fn<$$$T>($$$A)`.
+- *Namespacing and aliasing.* `React.useState(...)` and
+  `import { useState as useLocal }` are the same behavior wearing different
+  identifiers. A bare call pattern misses both; an import-binding rule
+  catches the alias.
+- *Wrapping.* `await`, optional chaining, and a returned promise change the
+  surrounding node without changing the behavior.
+
+Tell: the `got:` excerpt contains an implementation you would accept, spelled
+differently. Fix: alternate over the real forms - or climb to a structural
+rule, which is spelling-agnostic by construction. A regex that has to
+enumerate typography is usually asking for the wrong rung.
+
+**Cannot match** - the grader is pointed where the behavior never appears, so
+the case fails forever and looks like a permanent skill gap. Generation mode
+grades produced *files*; trigger mode grades the agent's *text*. A generation
+case asserting on an explanation the model only speaks cannot match, and
+neither can an `ast` rule naming a file the prompt never asks for, or an
+extension the parser does not support. Tell: mode and grader disagree about
+where the behavior lives. Fix: move the assertion to where the behavior is,
+or change the prompt so the behavior lands in a file.
+
+**Leaked rubric** - the case shows the answer to both arms before grading.
+Two shapes: a prompt that names the technique being graded (compliance test,
+not a disposition test - both arms pass), and a fixture that stages the
+expected artifact where every arm can read it. Tell: ask what the control arm
+could have done differently; if the answer is "nothing, it was told", the case
+measures instruction-following. Fix: hold the technique out and stage only the
+task's inputs.
+
+**Unstable verdict** - the behavior is genuinely bistable and `trials: 1`
+records a coin toss as a fact. Observed: a model that writes a debug toggle
+unprompted on some rolls and not others. Tell: identical re-runs disagree.
+Fix: `trials: 3` on cases whose verdict drives a decision; above 1, skillval
+escalates on disagreement automatically. Note this is a *measurement* fix -
+the underlying bistability is itself a finding about how reliably the model
+holds the behavior.
+
 ## Fixing a false verdict versus gaming a test
 
 These produce identical diffs - both edit an assert - and are opposites. The
@@ -195,11 +243,25 @@ Two cautions from real runs:
   instill the disposition strongly enough, or its trigger is too narrow to fire
   on ordinary work.
 
-## The barrier: presence, not quality
+## The barrier: presence, then behavior and shape, then quality
 
-The held-out reframe keeps you deterministic - it is still a regex over output,
-measuring *presence*. But presence and quality are different questions, and only
-presence is deterministic:
+This section used to say the deterministic ceiling was *presence*. That was
+true when regex was the only instrument; it is not any more, and the correction
+matters because it moved a case everyone cited as unreachable.
+
+Execution grading (`command_exit`) decides what the produced code *does* -
+whether a rejection preserves its cause, whether a snapshot tracks live state.
+Structural grading (`assert.ast`) decides what the code *is* - and it splits
+the canonical example below: an `assert` guarding a constructor parameter is
+input validation, while a guard reading instance state inside an operation is
+an internal invariant. Regex cannot tell those apart; a structural rule can,
+because the distinction is literally a matter of where the node sits.
+
+What remains beyond reach is quality: whether a span's attributes are useful,
+whether an error message helps. The tell for a genuinely unreachable case is
+that you can name a lookalike which passes the strongest rule you can write.
+
+The older presence-only framing, still correct for regex-graded cases:
 
 - **Clean (presence is a faithful proxy):** markers a plain implementation would
   not spuriously emit - `debugInfo`, `correlationId`, a tracing `span`. Baseline
@@ -212,7 +274,7 @@ presence is deterministic:
   presence is ambiguous; the distinction is a judgment.
 
 The decision, per case: ask whether the assertion measures that the behavior
-*appeared* or that it is *good/correct/distinct*. Appeared -> deterministic,
-write it. Good/correct/distinct -> the model judge (roadmap); flag it, do not
-fake it with a regex. Forcing a regex across the barrier is the false-verdict
-failure - a green checkmark on a question it never actually answered.
+*appeared*, what it *does*, what it *is*, or whether it is *good*. Appeared ->
+regex. Does -> execution. Is -> structural. Good -> the model judge (roadmap);
+flag it, do not fake it. Forcing any grader across its own barrier is the
+false-verdict failure - a green checkmark on a question it never answered.
