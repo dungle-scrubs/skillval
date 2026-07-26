@@ -388,6 +388,41 @@ standards-python/ty-over-mypy       ----               LOAD                noop
 observability/boundary-tracing      noop               LOAD                LOAD
 ```
 
+### Your profile decides what counts as dead weight
+
+Whether a rule is worth keeping depends on how *you* work. A rule that is load-bearing at low
+reasoning effort and a no-op at high is worth keeping if you live at low effort, and is context
+tax if you live at high. Name the identities you actually run:
+
+```yaml
+# config.yml
+profile:
+  targets:
+    - claude/sonnet/low
+```
+
+The ledger's `verdict` column then reads **keep** when a rule is load-bearing on any tier you run,
+and **PRUNE** only when it is a no-op across all of them; `--prune-candidates` filters to those.
+With no profile, every identity on record counts.
+
+Note the half that surprises people: this also demotes rules that only earn their keep *above*
+your tier. A rule that is load-bearing at high and a no-op at low is dead weight under a low-only
+profile - correctly, since you never work where it helps. List every tier you actually use, not
+just your favourite one.
+
+That second shape is real rather than a quirk, because a verdict compares two arms and raising
+effort moves both. Usually the baseline **converges** on the rule's answer - the model reaches for
+it unaided once it thinks harder - so the rule is outgrown. But a baseline can also **diverge**: at
+low effort a model gives a short conventional answer that happens to match the house pick, and at
+high effort it deliberates, weighs the alternatives, and lands somewhere else that is defensible
+but is not your convention. More thinking means more considered alternatives, and your pick is only
+one of them - so a rule expressing a preference can become *more* necessary as the model improves,
+not less.
+
+A verdict of `not-invoked` or `inconclusive` is silence, not evidence: it can neither argue for
+keeping a rule nor for pruning it, and a row with nothing but silence reads as
+insufficient-evidence.
+
 `--transitions` shows only the rows whose verdict differs across identities, which is where the
 information is: a rule that is load-bearing at one tier and a no-op at another has a **scope**, not
 a defect, and the matrix is what tells you which tiers still need it.

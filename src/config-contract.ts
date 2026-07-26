@@ -40,6 +40,25 @@ export const configFileSchema = Type.ReadonlyObject(
         },
       ),
     ),
+    // The executor identities you actually run, as name/model/thinking (the same identity the
+    // ledger columns use). Dead weight is relative to how you work: a rule that is load-bearing at
+    // low effort and a no-op at high is not prunable for someone who lives at low effort, and is
+    // for someone who lives at high. With no profile, every identity on record counts.
+    profile: Type.Optional(
+      Type.ReadonlyObject(
+        Type.Object({
+          targets: Type.Readonly(
+            Type.Array(Type.String({ minLength: 1, pattern: String.raw`\S` }), {
+              description:
+                "Executor identities you run, e.g. claude/sonnet/low. A rule is a prune candidate only when it is a no-op across ALL of them.",
+              minItems: 1,
+              uniqueItems: true,
+            }),
+          ),
+        }),
+        { additionalProperties: false },
+      ),
+    ),
     projects: Type.Optional(
       Type.Readonly(
         Type.Array(Type.String({ minLength: 1, pattern: String.raw`\S` }), {

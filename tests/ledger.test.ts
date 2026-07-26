@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildLedger, caseVerdict, executorIdentity, transitions } from "../src/ledger.js";
+import {
+  buildLedger,
+  caseVerdict,
+  executorIdentity,
+  recommendFor,
+  transitions,
+} from "../src/ledger.js";
 import type { RunReport } from "../src/runner.js";
 import type { ArmResult, CaseResult, Check, RuntimeArm } from "../src/types.js";
 
@@ -170,5 +176,55 @@ describe("buildLedger", () => {
 describe("executorIdentity", () => {
   it("keys on the fields the cache keys on", () => {
     expect(executorIdentity(executor("sonnet", "high"))).toBe("claude/sonnet/high");
+  });
+});
+
+describe("recommendFor", () => {
+  const row = (cells: Record<string, string>) => ({
+    caseId: "c",
+    cells: Object.fromEntries(
+      Object.entries(cells).map(([k, v]) => [k, { generatedAt: "t", verdict: v as never }]),
+    ),
+    skill: "s",
+  });
+
+  it("keeps a rule that is load-bearing on any tier the reader actually runs", () => {
+    // The user's case: lives at low effort, so a rule the model outgrows at high is still theirs
+    // to keep. Dead weight is relative to how you work.
+    const outgrown = row({
+      "claude/sonnet/high": "no-op",
+      "claude/sonnet/low": "load-bearing",
+    });
+    expect(recommendFor(outgrown, ["claude/sonnet/low"])).toBe("keep");
+    expect(recommendFor(outgrown, ["claude/sonnet/high"])).toBe("prune-candidate");
+  });
+
+  it("demotes a rule that only earns its keep above the reader's tier", () => {
+    // The mirror image, and the half that surprises: load-bearing at high says nothing to someone
+    // who never works there.
+    const highOnly = row({
+      "claude/sonnet/high": "load-bearing",
+      "claude/sonnet/low": "no-op",
+    });
+    expect(recommendFor(highOnly, ["claude/sonnet/low"])).toBe("prune-candidate");
+    expect(recommendFor(highOnly, ["claude/sonnet/low", "claude/sonnet/high"])).toBe("keep");
+  });
+
+  it("treats silence as silence, never as evidence to prune", () => {
+    // A skill that was never invoked, or a trial that never graded, cannot argue either way.
+    const quiet = row({
+      "claude/sonnet/low": "not-invoked",
+      "claude/sonnet/medium": "inconclusive",
+    });
+    expect(recommendFor(quiet, ["claude/sonnet/low", "claude/sonnet/medium"])).toBe(
+      "insufficient-evidence",
+    );
+    expect(recommendFor(quiet, ["claude/sonnet/low"])).toBe("insufficient-evidence");
+  });
+
+  it("weighs every identity on record when no profile is set", () => {
+    const mixed = row({ "claude/sonnet/high": "no-op", "claude/sonnet/low": "load-bearing" });
+    expect(recommendFor(mixed, undefined)).toBe("keep");
+    expect(recommendFor(mixed, [])).toBe("keep");
   });
 });
