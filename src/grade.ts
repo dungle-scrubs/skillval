@@ -27,6 +27,9 @@ export function gradeTrial(
   arm: RuntimeArm,
   trace: Trace,
   workspace: string,
+  // Absolute paths of the skill directories skillval staged into this workspace. Excluded from the
+  // graded text: they are skillval's own input, not the model's output.
+  seededPaths: readonly string[] = [],
 ): Check[] {
   const checks: Check[] = [];
 
@@ -47,9 +50,15 @@ export function gradeTrial(
     });
   }
 
+  // A staged skill is now COPIED into the workspace (codex cannot see a symlinked SKILL.md), so
+  // walkFiles finds its text and generation mode would grade the skill as if the model had written
+  // it. That is a false verdict in both directions: a must_not_match trap fires on the skill's own
+  // prose (observed: a Tailwind case banning "tailwind.config" matched the skill's sentence saying
+  // configuration does NOT live there), and a must_match can pass on text the model never produced.
   const gradedText =
     evalCase.mode === "generation"
       ? walkFiles(workspace)
+          .filter((file) => !seededPaths.some((seeded) => file.startsWith(`${seeded}/`)))
           .filter((file) => !INJECTED_FILES.has(relative(workspace, file)))
           .map((file) => `=== ${relative(workspace, file)} ===\n${readFileSync(file, "utf8")}`)
           .join("\n")
