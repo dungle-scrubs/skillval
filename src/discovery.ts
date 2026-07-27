@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { readCaseFile } from "./case-file.js";
 import type { SkillEvals } from "./types.js";
+import { skillContentHash } from "./utils.js";
 
 export type InstructionFile = "AGENTS.md" | "CLAUDE.md";
 
@@ -264,6 +265,25 @@ function describeSkill(name: string, root: string, skillDirectory: string): Disc
   let evals: SkillEvals;
   try {
     evals = readCaseFile(caseFilePath, name);
+  } catch (error) {
+    return {
+      caseCount: 0,
+      class: "invalid",
+      hasSkillval: true,
+      name,
+      root,
+      skillDirectory,
+      status: "invalid",
+      validationError: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  // Seedability is part of readiness. skillContentHash throws on a symlinked skill - it cannot
+  // cover bytes it never reads - and that throw used to happen mid-run inside an eager map, so ONE
+  // bad skill aborted the entire run before any valid skill reported anything. Discovering it here
+  // turns that into a clean per-skill error, which is what every other malformed-skill case does.
+  try {
+    skillContentHash(skillDirectory);
   } catch (error) {
     return {
       caseCount: 0,
