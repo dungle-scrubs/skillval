@@ -210,18 +210,26 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
   };
 }
 
-// stopReason values that mean the turn did not finish. Deliberately an explicit deny-list, not an
-// allow-list of successes: pi may add reasons this code has never seen, and an unknown reason must
-// keep its current (gradeable) treatment rather than silently becoming an infrastructure failure.
-const FAILED_STOP_REASONS = new Set(["aborted", "cancelled", "canceled", "error", "refusal"]);
+// stopReason values that mean the model produced an answer worth grading.
+const GRADEABLE_STOP_REASONS = new Set(["stop", "length", "toolUse", "tool_use", "max_tokens"]);
 
-// Whether the LAST assistant message in a transcript ended in an explicit failure.
-function endedInFailure(messages: readonly unknown[]): boolean {
+// Whether the LAST assistant message reports a turn that finished with an answer worth grading.
+//
+// An ALLOW-list, reversed from the deny-list this started as. A deny-list fails OPEN: a reason pi
+// renames, or a malformed event missing the field entirely, would be graded as content and cached -
+// the exact class of false verdict the check exists to prevent. Unknown reasons are infrastructure
+// until someone looks at them, which is loud and recoverable rather than silent and cached.
+//
+// The trade this accepts: if pi ever adds a reason meaning "the model refused", that is real model
+// BEHAVIOUR and belongs in a verdict, not in infrastructure. Adding it here would be a deliberate
+// decision, which is the point - the classification should never be a default.
+function endedGradeably(messages: readonly unknown[]): boolean {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
     if (!isRecord(message) || message.role !== "assistant") continue;
-    return typeof message.stopReason === "string" && FAILED_STOP_REASONS.has(message.stopReason);
+    return typeof message.stopReason === "string" && GRADEABLE_STOP_REASONS.has(message.stopReason);
   }
+  // No assistant message at all means nothing was produced.
   return false;
 }
 
@@ -248,7 +256,7 @@ export function parsePiTrace(stdout: string, skillName: string): Trace {
     // `willRetry`. An aborted or errored turn produced no gradeable answer, so treating every
     // agent_end as success recorded infrastructure as a content result. Only explicit failure
     // markers flip this, so an unfamiliar stopReason still grades exactly as before.
-    completed = event.willRetry !== true && !endedInFailure(event.messages);
+    completed = event.willRetry !== true && endedGradeably(event.messages);
     // A read that errored (missing file, denied) never put the skill into context, so a toolCall
     // only counts when its correlated toolResult did not fail. Collected first: the result message
     // always follows its call in the transcript, but one pass over ids keeps the check order-free.

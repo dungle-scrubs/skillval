@@ -1,5 +1,14 @@
 /** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AblationVariants } from "./ablate.js";
@@ -16,6 +25,7 @@ import type {
 } from "./discovery.js";
 import { discoverProjects, discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
+import { stagedRelativePaths } from "./executors/seed.js";
 import { ExecutorInfraError } from "./executors/spawn.js";
 import type { Executor, ExecutorMetadata } from "./executors/types.js";
 import type { ResolvedFixture } from "./fixture.js";
@@ -1312,6 +1322,39 @@ function stagedSkillPaths(
   return seeded.map((member) => join(workspace, skillsRoot, member.name));
 }
 
+// Removes only the files staging wrote, then any directories those leave empty. Never the staged
+// directory wholesale: a fixture may have placed a file at that path, and the model may have
+// written inside it, and destroying either makes a solo arm fail where its baseline passes - which
+// caseOutcome reads as a no-op, i.e. a prune candidate.
+function removeStagedFiles(staged: readonly string[], seeded: readonly SeededMember[]): void {
+  staged.forEach((target, index) => {
+    const member = seeded[index];
+    if (member === undefined) return;
+    for (const relative of stagedRelativePaths(member.directory)) {
+      rmSync(join(target, relative), { force: true });
+    }
+    pruneEmptyDirectories(target);
+  });
+}
+
+// Depth-first, so a directory that only ever held staged files disappears while one holding
+// model output survives.
+function pruneEmptyDirectories(directory: string): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(directory);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const path = join(directory, entry);
+    if (statSync(path, { throwIfNoEntry: false })?.isDirectory() === true) {
+      pruneEmptyDirectories(path);
+    }
+  }
+  if (readdirSync(directory).length === 0) rmSync(directory, { force: true, recursive: true });
+}
+
 function runTrial(
   context: ArmContext,
   arm: RuntimeArm,
@@ -1341,7 +1384,7 @@ function runTrial(
     // Removing the exact staged directories, never the whole skills root, so a skill the MODEL
     // authored under the same root is still graded (create-skill's cases depend on that).
     const staged = stagedSkillPaths(workspace, context.executor.metadata.skillsRoot, seeded);
-    for (const path of staged) rmSync(path, { force: true, recursive: true });
+    removeStagedFiles(staged, seeded);
     const checks = gradeTrial(context.evalCase, arm, trace, workspace, staged);
     return {
       checks,
