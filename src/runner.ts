@@ -1,6 +1,6 @@
 /** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
 import {
-  lstatSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -35,7 +35,7 @@ import { renderHtmlReport } from "./html-report.js";
 import type { InstructionFileContent } from "./instruction.js";
 import { armInstructionContent, INSTRUCTION_ARMS, resolveRuleFile } from "./instruction.js";
 import { resolveLoadout } from "./loadout.js";
-import type { ArmResult, CaseResult, EvalCase, RuntimeArm, TrialResult } from "./types.js";
+import type { ArmResult, CaseResult, Check, EvalCase, RuntimeArm, TrialResult } from "./types.js";
 import { loadoutHash, sha256, skillContentHash } from "./utils.js";
 import type { ArmState, Verdict } from "./verdict.js";
 import { armState, groupVerdict, INSTRUCTION_VERDICT_TEXT, VERDICT_TEXT } from "./verdict.js";
@@ -1311,35 +1311,51 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
 }
 
 /**
- * Removes exactly what staging wrote, from the manifest staging recorded as it wrote it.
+ * Builds a throwaway copy of the trial workspace for grading, omitting the skill files staging put
+ * there and following no symlinks.
  *
- * Every path is checked with `lstat` before removal and must still be the kind of thing staging
- * created. A model can replace a staged directory with a symlink pointing anywhere on disk, and a
- * plain recursive delete would follow it and destroy files outside the workspace with skillval's
- * own privileges. Files are unlinked individually; directories are only removed if staging created
- * them, is empty, and is not a symlink - so a directory the FIXTURE supplied, or one the model
- * deliberately left empty, survives to be graded.
+ * Replaces deleting staged files out of the live workspace, which could not be made safe. Deletion
+ * had to identify what to remove by PATHNAME in a tree the model can rewrite: replacing a staged
+ * directory with a symlink to somewhere else made a leaf-level lstat check useless, because the
+ * intermediate component was already followed by the time the leaf was examined. Every guard added
+ * there protected one component of a path an adversary controlled.
+ *
+ * Copying inverts the risk. Nothing in the model's tree is ever removed, so the worst case is a
+ * file that should have been hidden being graded, not a file outside the workspace being deleted.
+ * A staged file is skipped only when its bytes still hash to what staging wrote; the moment the
+ * model edits one it becomes output and is copied. Symlinks are never followed and never
+ * reproduced, so no grader can reach outside the snapshot.
  */
-export function removeStaged(staged: readonly StagedSkill[]): void {
+export function gradingSnapshot(workspace: string, staged: readonly StagedSkill[]): string {
+  const snapshot = mkdtempSync(join(tmpdir(), "skillval-grade-"));
+  const unchanged = new Map<string, string>();
   for (const skill of staged) {
-    for (const file of skill.created) {
-      const stats = lstatSync(file, { throwIfNoEntry: false });
-      // Gone, or replaced by something staging did not write: leave it. A replaced path is model
-      // output, and deleting it would make the solo arm fail where its baseline passes.
-      if (stats === undefined || !stats.isFile()) continue;
-      rmSync(file, { force: true });
-    }
-    // Innermost first, so a directory tree staging created collapses cleanly.
-    for (const directory of [...skill.directories].reverse()) {
-      const stats = lstatSync(directory, { throwIfNoEntry: false });
-      if (stats === undefined || !stats.isDirectory() || stats.isSymbolicLink()) continue;
-      if (readdirSync(directory).length > 0) continue;
-      // `recursive` is required to remove a directory at all - without it rmSync throws EISDIR -
-      // but it is safe here precisely because the two guards above proved this is a real, empty
-      // directory rather than a symlink or something holding output.
-      rmSync(directory, { force: true, recursive: true });
-    }
+    for (const file of skill.created) unchanged.set(file.path, file.hash);
   }
+
+  const copy = (from: string, to: string): void => {
+    for (const entry of readdirSync(from, { withFileTypes: true })) {
+      const source = join(from, entry.name);
+      const destination = join(to, entry.name);
+      // Never followed and never recreated: a symlink in the graded tree could otherwise let a
+      // command_exit grader read or write outside the snapshot.
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        mkdirSync(destination, { recursive: true });
+        copy(source, destination);
+        // A directory that held nothing but staged input is harness residue. Pruning it HERE is
+        // safe in a way pruning the model's own tree never was - this copy is ours.
+        if (readdirSync(destination).length === 0) rmSync(destination, { recursive: true });
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const expected = unchanged.get(source);
+      if (expected !== undefined && sha256(readFileSync(source)) === expected) continue;
+      copyFileSync(source, destination);
+    }
+  };
+  copy(workspace, snapshot);
+  return snapshot;
 }
 
 function runTrial(
@@ -1371,14 +1387,13 @@ function runTrial(
     // Removing the exact staged directories, never the whole skills root, so a skill the MODEL
     // authored under the same root is still graded (create-skill's cases depend on that).
     const staged = trace.stagedPaths ?? [];
-    removeStaged(staged);
-    const checks = gradeTrial(
-      context.evalCase,
-      arm,
-      trace,
-      workspace,
-      staged.map((skill) => skill.target),
-    );
+    const graded = gradingSnapshot(workspace, staged);
+    let checks: Check[];
+    try {
+      checks = gradeTrial(context.evalCase, arm, trace, graded, []);
+    } finally {
+      rmSync(graded, { force: true, recursive: true });
+    }
     return {
       checks,
       fixtureSetup,

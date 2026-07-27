@@ -67,7 +67,12 @@ import { sha256 } from "./utils.js";
 //     at hash time, upstream of the cache, so adding one to a cached skill can no longer return a
 //     stale verdict. An alias-valued opt-out is now detected. pi's allow-list matches pi's real
 //     normalized reasons rather than raw provider spellings.
-export const RUNNER_VERSION = 29;
+// 30: grading runs against a SNAPSHOT of the workspace instead of deleting staged files out of it.
+//     Deleting could not be made safe - identifying what to remove by pathname, in a tree the model
+//     rewrites, meant an intermediate symlink was already followed by the time the leaf was checked.
+//     A staged file is now omitted from the snapshot only while its bytes still match what staging
+//     wrote, so an edited one is graded as the output it is, and symlinks are never reproduced.
+export const RUNNER_VERSION = 30;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

@@ -19,7 +19,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { isAlias, parseDocument, visit } from "yaml";
-import { SKIPPED_DIRECTORIES } from "../utils.js";
+import { SKIPPED_DIRECTORIES, sha256 } from "../utils.js";
 import { ExecutorInfraError } from "./spawn.js";
 
 // The eval definition is the test, not the skill. It is excluded from what a trial can see, and
@@ -38,9 +38,15 @@ const SKILL_FILE = "SKILL.md";
  * truth once removes both, and `directories` distinguishes a directory staging created from one the
  * fixture supplied - only the former may be pruned.
  */
+export interface StagedFile {
+  /** sha256 of the bytes staging wrote, so a later change is detectable as model output. */
+  readonly hash: string;
+  readonly path: string;
+}
+
 export interface StagedSkill {
-  /** Absolute paths of files staging wrote. */
-  readonly created: readonly string[];
+  /** Every file staging wrote, with the bytes it wrote. */
+  readonly created: readonly StagedFile[];
   /** Absolute paths of directories staging created, outermost first. */
   readonly directories: readonly string[];
   readonly target: string;
@@ -166,7 +172,7 @@ function symlinkRejected(path: string): Error {
 function copyTree(
   source: string,
   destination: string,
-  created: string[],
+  created: StagedFile[],
   directories: string[],
 ): void {
   const entries = readdirSync(source, { withFileTypes: true });
@@ -183,7 +189,7 @@ function copyTree(
     }
     if (entry.isFile()) {
       copyFileSync(from, to);
-      created.push(to);
+      created.push({ hash: sha256(readFileSync(to)), path: to });
     }
   }
 }
@@ -236,7 +242,7 @@ export function stageSkill(parent: string, name: string, skillDirectory: string)
 
 function stage(parent: string, name: string, skillDirectory: string): StagedSkill {
   const target = join(parent, name);
-  const created: string[] = [];
+  const created: StagedFile[] = [];
   const directories: string[] = [];
   if (!existsSync(target)) directories.push(target);
   mkdirSync(target, { recursive: true });
@@ -251,8 +257,9 @@ function stage(parent: string, name: string, skillDirectory: string): StagedSkil
     const destination = join(target, entry.name);
     if (entry.isSymbolicLink()) throw symlinkRejected(source);
     if (entry.name === SKILL_FILE) {
-      writeFileSync(destination, withoutInvocationOptOut(readFileSync(source, "utf8")).text);
-      created.push(destination);
+      const text = withoutInvocationOptOut(readFileSync(source, "utf8")).text;
+      writeFileSync(destination, text);
+      created.push({ hash: sha256(text), path: destination });
       continue;
     }
     // Directories are walked entry by entry rather than handed to a recursive cpSync, so the skip
@@ -261,7 +268,7 @@ function stage(parent: string, name: string, skillDirectory: string): StagedSkil
     if (entry.isDirectory()) copyTree(source, destination, created, directories);
     else if (entry.isFile()) {
       copyFileSync(source, destination);
-      created.push(destination);
+      created.push({ hash: sha256(readFileSync(destination)), path: destination });
     }
   }
   return { created, directories, target };

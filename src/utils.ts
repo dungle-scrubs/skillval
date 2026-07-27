@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { EVAL_DEFINITION_FILE } from "./executors/seed.js";
 
-export function sha256(input: string): string {
+export function sha256(input: string | Uint8Array): string {
   return createHash("sha256").update(input).digest("hex");
 }
 

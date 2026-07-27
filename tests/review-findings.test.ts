@@ -24,7 +24,7 @@ import { SKILLS_ROOT as codexSkillsRoot } from "../src/executors/codex.js";
 import { parsePiTrace, SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
 import { stagedRelativePaths, stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
 import { ExecutorInfraError } from "../src/executors/spawn.js";
-import { removeStaged } from "../src/runner.js";
+import { gradingSnapshot } from "../src/runner.js";
 import { pathContains, skillContentHash } from "../src/utils.js";
 
 const directories: string[] = [];
@@ -316,10 +316,12 @@ describe("second review, finding 3: frontmatter rewriting must not corrupt the s
   });
 });
 
-describe("third review: teardown deletes only what staging recorded writing", () => {
-  it("never follows a symlink a model planted where a staged directory was", () => {
-    // A model can replace a staged directory with a symlink pointing anywhere. A recursive delete
-    // would follow it and destroy files OUTSIDE the workspace with skillval's own privileges.
+describe("fourth review: grading runs against a snapshot, nothing is deleted", () => {
+  it("never reaches outside the workspace, even through a planted symlink", () => {
+    // Deletion could not be made safe: identifying what to remove by pathname, in a tree the model
+    // rewrites, meant an intermediate symlink was already followed by the time the leaf was
+    // lstat-checked. Copying inverts the risk - the worst case becomes grading a file that should
+    // have been hidden, never deleting one outside the workspace.
     const source = makeDir();
     writeFileSync(join(source, "SKILL.md"), "# s\n");
     mkdirSync(join(source, "references"), { recursive: true });
@@ -329,41 +331,53 @@ describe("third review: teardown deletes only what staging recorded writing", ()
     const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
     if (staged === undefined) throw new Error("seeding produced no manifest");
 
-    // The model swaps the staged directory for a link to something precious.
+    // The external tree contains the SAME relative path the manifest names, which is what defeated
+    // the leaf-level guard.
     const outside = makeDir();
-    writeFileSync(join(outside, "precious.txt"), "do not delete\n");
+    mkdirSync(join(outside, "references"), { recursive: true });
+    writeFileSync(join(outside, "references", "detail.md"), "precious\n");
     rmSync(join(staged.target, "references"), { force: true, recursive: true });
-    symlinkSync(outside, join(staged.target, "references"));
+    symlinkSync(join(outside, "references"), join(staged.target, "references"));
 
-    removeStaged([staged]);
-    expect(existsSync(join(outside, "precious.txt"))).toBe(true);
+    const snapshot = gradingSnapshot(workspace, [staged]);
+    expect(readFileSync(join(outside, "references", "detail.md"), "utf8")).toBe("precious\n");
+    // The symlink is not reproduced either, so no grader can traverse it.
+    expect(existsSync(join(snapshot, ".claude/skills/s/references"))).toBe(false);
+    rmSync(snapshot, { force: true, recursive: true });
   });
 
-  it("removes a staged path even when the model overwrote it, and says so deliberately", () => {
+  it("hides an unchanged staged file but grades one the model edited", () => {
     const source = makeDir();
     writeFileSync(join(source, "SKILL.md"), "# original\n");
     const workspace = makeDir();
-    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
-    if (staged === undefined) throw new Error("seeding produced no manifest");
-    // Staging wrote SKILL.md; the model overwrites it. Ownership by pathname alone would delete
-    // the model's version, so the arm would lose its own output and fail where baseline passes.
-    writeFileSync(join(staged.target, "SKILL.md"), "# rewritten by the model\n");
-    removeStaged([staged]);
-    // Deleted, because it is still a file staging recorded writing - the collision policy is
-    // "staging owns the path it wrote". Pinned so the choice is deliberate rather than accidental.
-    expect(existsSync(join(staged.target, "SKILL.md"))).toBe(false);
+    const [first] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (first === undefined) throw new Error("seeding produced no manifest");
+
+    const hidden = gradingSnapshot(workspace, [first]);
+    expect(existsSync(join(hidden, ".claude/skills/s/SKILL.md"))).toBe(false);
+    rmSync(hidden, { force: true, recursive: true });
+
+    // Once the model rewrites it, the bytes no longer match what staging wrote - that is output.
+    writeFileSync(join(first.target, "SKILL.md"), "# rewritten by the model\n");
+    const kept = gradingSnapshot(workspace, [first]);
+    expect(readFileSync(join(kept, ".claude/skills/s/SKILL.md"), "utf8")).toContain("rewritten");
+    rmSync(kept, { force: true, recursive: true });
   });
 
-  it("leaves a directory staging did not create", () => {
+  it("leaves the model's real output alone and prunes only harness residue", () => {
     const source = makeDir();
     writeFileSync(join(source, "SKILL.md"), "# s\n");
     const workspace = makeDir();
     const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
     if (staged === undefined) throw new Error("seeding produced no manifest");
-    // A fixture directory inside the staged root, which staging never recorded.
-    mkdirSync(join(staged.target, "from-the-fixture"), { recursive: true });
-    removeStaged([staged]);
-    expect(existsSync(join(staged.target, "from-the-fixture"))).toBe(true);
+    writeFileSync(join(workspace, "produced.ts"), "export const x = 1;\n");
+
+    const snapshot = gradingSnapshot(workspace, [staged]);
+    expect(existsSync(join(snapshot, "produced.ts"))).toBe(true);
+    // The provider skills root held nothing but staged input, so it must not appear - otherwise a
+    // raw-workspace grader sees a directory in the solo arm that the baseline never had.
+    expect(existsSync(join(snapshot, ".claude"))).toBe(false);
+    rmSync(snapshot, { force: true, recursive: true });
   });
 });
 
