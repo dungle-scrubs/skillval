@@ -35,6 +35,9 @@ export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = 
 // seeds exactly this arm's set on top. pi loads explicit --skill paths even under --no-skills
 // (verified against pi's resource loader), so the empty baseline sees no skills and the solo arm
 // sees only the target.
+// See claude.ts SKILLS_ROOT.
+export const SKILLS_ROOT = ".skillval-skills";
+
 export function piSkillArgs(seededSkills: readonly SeededSkill[], stagingRoot?: string): string[] {
   const args = ["--no-skills"];
   for (const skill of seededSkills) {
@@ -110,7 +113,7 @@ export class PiExecutor implements Executor {
     seedInstruction(request.workspace, request.seededInstruction);
     // Clean skill loading (see piSkillArgs): --no-skills hides the user's library, --skill seeds
     // this arm's set. Instruction-file isolation is handled separately, below.
-    const skillStaging = join(request.workspace, ".skillval-skills");
+    const skillStaging = join(request.workspace, SKILLS_ROOT);
     mkdirSync(skillStaging, { recursive: true });
     const arm = piSkillArgs(request.seededSkills, skillStaging);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
@@ -198,6 +201,7 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
     invocationDetection: PI_INVOCATION_DETECTION,
     model,
     name: "pi",
+    skillsRoot: SKILLS_ROOT,
     thinking,
     version,
   };

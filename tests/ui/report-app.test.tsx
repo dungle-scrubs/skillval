@@ -12,6 +12,7 @@ const executor = {
   invocationDetection: "heuristic" as const,
   model: "gpt-5.6-sol",
   name: "codex",
+  skillsRoot: ".agents/skills",
   thinking: "medium",
   version: "0.145.0",
 };

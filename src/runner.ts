@@ -16,7 +16,6 @@ import type {
 } from "./discovery.js";
 import { discoverProjects, discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
-import { SKILL_STAGING_ROOTS } from "./executors/seed.js";
 import { ExecutorInfraError } from "./executors/spawn.js";
 import type { Executor, ExecutorMetadata } from "./executors/types.js";
 import type { ResolvedFixture } from "./fixture.js";
@@ -1301,12 +1300,16 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
   return result;
 }
 
-// Absolute paths a seeded skill may occupy in the workspace. Every executor's staging root is
-// tried because the runner is executor-agnostic here; a path that does not exist costs nothing.
-function stagedSkillPaths(workspace: string, seeded: readonly SeededMember[]): string[] {
-  return seeded.flatMap((member) =>
-    SKILL_STAGING_ROOTS.map((root) => join(workspace, root, member.name)),
-  );
+// Absolute paths this run staged, from the ACTIVE executor's own root. Never every known root: the
+// runner both excludes and deletes these before grading, so touching another executor's root would
+// destroy model output that legitimately lives there - create-skill's cases author skills under
+// .claude/skills, which a codex run must still grade.
+function stagedSkillPaths(
+  workspace: string,
+  skillsRoot: string,
+  seeded: readonly SeededMember[],
+): string[] {
+  return seeded.map((member) => join(workspace, skillsRoot, member.name));
 }
 
 function runTrial(
@@ -1337,7 +1340,7 @@ function runTrial(
     // cannot be filtered after the fact (command_exit runs arbitrary shell against the tree).
     // Removing the exact staged directories, never the whole skills root, so a skill the MODEL
     // authored under the same root is still graded (create-skill's cases depend on that).
-    const staged = stagedSkillPaths(workspace, seeded);
+    const staged = stagedSkillPaths(workspace, context.executor.metadata.skillsRoot, seeded);
     for (const path of staged) rmSync(path, { force: true, recursive: true });
     const checks = gradeTrial(context.evalCase, arm, trace, workspace, staged);
     return {

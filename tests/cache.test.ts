@@ -25,6 +25,7 @@ const identity: ArmCacheIdentity = {
     invocationDetection: "heuristic",
     model: "model-a",
     name: "codex",
+    skillsRoot: ".agents/skills",
     thinking: "medium",
     version: "codex 1.0",
   },

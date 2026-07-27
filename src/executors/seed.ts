@@ -12,6 +12,7 @@ import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isRecord, SKIPPED_DIRECTORIES } from "../utils.js";
+import { ExecutorInfraError } from "./spawn.js";
 
 // The eval definition is the test, not the skill. It is excluded from what a trial can see, and
 // from the skill's content hash, because neither the model nor the cache should treat a change to
@@ -19,16 +20,6 @@ import { isRecord, SKIPPED_DIRECTORIES } from "../utils.js";
 export const EVAL_DEFINITION_FILE = "skillval.yml";
 
 const SKILL_FILE = "SKILL.md";
-
-// Where each executor stages seeded skills, relative to the trial workspace. Listed in one place
-// because the grader must exclude exactly what seeding created: a staged skill is copied into the
-// workspace, so generation mode would otherwise grade skillval's own input as model output. Kept
-// honest by a test that seeds through each executor and asserts the path falls under one of these.
-export const SKILL_STAGING_ROOTS: readonly string[] = [
-  ".agents/skills",
-  ".claude/skills",
-  ".skillval-skills",
-];
 
 // The leading `---` block of a SKILL.md, and the key that hides a skill from automatic invocation.
 // Frontmatter is located structurally and its value parsed as YAML rather than text-matched: the
@@ -90,6 +81,22 @@ export function withoutInvocationOptOut(source: string): { changed: boolean; tex
  * opt-out without touching the user's file.
  */
 export function stageSkill(parent: string, name: string, skillDirectory: string): string {
+  try {
+    return stage(parent, name, skillDirectory);
+  } catch (error) {
+    // Staging happens BEFORE the model runs, so nothing about the skill has been tested when it
+    // fails. Permissions, ENOSPC, a dangling symlink or a special file would otherwise surface as
+    // an ordinary Error, be recorded as a failing `run` check, and vote against the skill - the
+    // same class of false verdict that crashes and provider outages already raise as typed
+    // infrastructure. Copy staging introduced many more of these failure modes than symlinking.
+    throw new ExecutorInfraError(
+      `staging ${name} failed before the trial ran: ${error instanceof Error ? error.message : String(error)}`,
+      "staging-failed",
+    );
+  }
+}
+
+function stage(parent: string, name: string, skillDirectory: string): string {
   const target = join(parent, name);
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(skillDirectory)) {

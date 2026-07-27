@@ -19,11 +19,21 @@ export const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 // vote, and never caches it. A nonzero agent exit counts as a graded result only when the trace
 // shows a completed turn; an exit that completed nothing is infrastructure too (throwNeverGraded).
 export class ExecutorInfraError extends Error {
-  public readonly kind: "output-too-large" | "process-failed" | "provider-unavailable" | "timeout";
+  public readonly kind:
+    | "output-too-large"
+    | "process-failed"
+    | "provider-unavailable"
+    | "staging-failed"
+    | "timeout";
 
   public constructor(
     message: string,
-    kind: "output-too-large" | "process-failed" | "provider-unavailable" | "timeout",
+    kind:
+      | "output-too-large"
+      | "process-failed"
+      | "provider-unavailable"
+      | "staging-failed"
+      | "timeout",
   ) {
     super(message);
     this.kind = kind;
