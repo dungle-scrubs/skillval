@@ -76,7 +76,11 @@ import { sha256 } from "./utils.js";
 //     longer compile while silently omitting it and causing its own seeded input to be graded; and
 //     a skill whose content hash cannot be taken (a symlinked one) is reported as an INVALID skill
 //     at discovery rather than throwing mid-run and aborting every other skill with it.
-export const RUNNER_VERSION = 31;
+// 32: the invocation opt-out is spliced out by its own source byte range instead of the document
+//     being re-serialized. String(document) normalized flow spacing, rewrote comment whitespace and
+//     could change the value of a trailing |+ block scalar - a staging step silently editing a
+//     skill it was only asked to read.
+export const RUNNER_VERSION = 32;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

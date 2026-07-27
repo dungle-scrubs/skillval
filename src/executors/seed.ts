@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { isAlias, parseDocument, visit } from "yaml";
+import { isAlias, isMap, isPair, parseDocument, visit } from "yaml";
 import { SKIPPED_DIRECTORIES, sha256 } from "../utils.js";
 import { ExecutorInfraError } from "./spawn.js";
 
@@ -78,6 +78,36 @@ const OPT_OUT_KEY = "disable-model-invocation";
  * automatic invocation, which production has switched off, so it can only report a problem that
  * cannot happen. Those cases are tautologies and belong in neither corpus.
  */
+/**
+ * The byte range of the opt-out pair in the frontmatter source, from the pair's own node ranges.
+ *
+ * Ends at the START of the following key rather than the end of this value, so the line's newline
+ * and any trailing comment on it go with it and the next key stays column-aligned. For a trailing
+ * pair there is no following key, so the range runs to the end of the source.
+ */
+function optOutSpan(
+  document: ReturnType<typeof parseDocument>,
+  yaml: string,
+): { end: number; start: number } | undefined {
+  const contents: unknown = document.contents;
+  if (!isMap(contents)) return undefined;
+  const items = contents.items;
+  const index = items.findIndex(
+    (item) => isPair(item) && (item.key as { value?: unknown })?.value === OPT_OUT_KEY,
+  );
+  if (index === -1) return undefined;
+  const pair = items[index];
+  if (!isPair(pair)) return undefined;
+  const start = (pair.key as { range?: readonly number[] })?.range?.[0];
+  if (start === undefined) return undefined;
+  const next = items[index + 1];
+  const nextStart =
+    next !== undefined && isPair(next)
+      ? (next.key as { range?: readonly number[] })?.range?.[0]
+      : undefined;
+  return { end: nextStart ?? yaml.length, start };
+}
+
 export function withoutInvocationOptOut(source: string): { changed: boolean; text: string } {
   // A byte-order mark before `---` would hide the frontmatter entirely, leaving the opt-out in
   // place and the arm silently unfalsifiable.
@@ -126,8 +156,15 @@ export function withoutInvocationOptOut(source: string): { changed: boolean; tex
     }
   }
 
-  document.delete(OPT_OUT_KEY);
-  const rewritten = String(document).trimEnd();
+  // Spliced out of the SOURCE by its own byte range, never re-serialized. String(document) is
+  // serialization: it normalizes flow spacing ([a, b] becomes [ a, b ]), rewrites comment
+  // whitespace, normalizes CRLF, and can change the value of a trailing |+ block scalar. Every one
+  // of those silently edits a skill the harness was only supposed to read.
+  const span = optOutSpan(document, yaml);
+  if (span === undefined) {
+    throw new Error(`could not locate ${OPT_OUT_KEY} in the frontmatter source to remove it`);
+  }
+  const rewritten = yaml.slice(0, span.start) + yaml.slice(span.end);
   // Reparse what will actually be staged, so a transform that produced invalid YAML never reaches
   // the model.
   const verify = parseDocument(rewritten);

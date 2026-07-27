@@ -425,3 +425,37 @@ describe("fourth review: a bad skill degrades to invalid, it does not abort the 
     expect(found?.validationError ?? "").toMatch(/symlink/);
   });
 });
+
+describe("fourth review: removing the opt-out preserves every other byte", () => {
+  const strip = (frontmatter: string): string =>
+    withoutInvocationOptOut(`---\n${frontmatter}\n---\n\n# Body\n`).text;
+
+  it("does not reformat flow collections or comment spacing", () => {
+    // String(document) is serialization, not source preservation: it rewrote [Read, Write] as
+    // [ Read, Write ] and collapsed the spacing before a trailing comment. A staging step must
+    // never silently edit a skill it was only asked to read.
+    const kept = "allowed-tools: [Read, Write]   # keep me";
+    expect(strip(`name: s\ndisable-model-invocation: true\n${kept}`)).toContain(kept);
+  });
+
+  it("preserves a block scalar that follows it, including its trailing blank line", () => {
+    // trimEnd() on a re-serialized document changes a |+ value from "a\nb\n\n" to "a\nb\n".
+    const source =
+      "---\ndisable-model-invocation: true\nnotes: |+\n  alpha\n  beta\n\n---\n\n# Body\n";
+    const text = withoutInvocationOptOut(source).text;
+    expect(text).toContain("notes: |+\n  alpha\n  beta\n");
+    expect(text).not.toContain("disable-model-invocation");
+  });
+
+  it("keeps the key that follows column-aligned, with no stray blank line", () => {
+    expect(strip("name: s\ndisable-model-invocation: true\nallowed-tools: Read")).toContain(
+      "name: s\nallowed-tools: Read",
+    );
+  });
+
+  it("removes it when it is the last key", () => {
+    const text = strip("name: s\ndisable-model-invocation: true");
+    expect(text).toContain("name: s");
+    expect(text).not.toContain("disable-model-invocation");
+  });
+});
