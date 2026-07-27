@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord } from "../utils.js";
-import { stageSkill } from "./seed.js";
+import { type StagedSkill, stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
 import {
   assertEffortSupported,
@@ -40,7 +40,7 @@ export class ClaudeExecutor implements Executor {
   }
 
   public runTrial(request: TrialRequest): Trace {
-    seedSkills(request.workspace, request.seededSkills);
+    const staged = seedSkills(request.workspace, request.seededSkills);
     seedInstruction(request.workspace, request.seededInstruction);
     // Pass the effective model and effort explicitly so a --model/--effort override wins over the
     // rebuilt settings.json and the trial always runs what metadata reports and caches. metadata
@@ -89,7 +89,7 @@ export class ClaudeExecutor implements Executor {
       throwNeverGraded("claude -p", result.status, result.signal, result.stderr.slice(-500));
     }
 
-    return trace;
+    return { ...trace, stagedPaths: staged };
   }
 }
 
@@ -102,17 +102,19 @@ function defaultConfigDirectory(): string {
 // which would delete model output that happens to live there.
 export const SKILLS_ROOT = ".claude/skills";
 
-export function seedSkills(workspace: string, skills: readonly SeededSkill[]): void {
+export function seedSkills(workspace: string, skills: readonly SeededSkill[]): StagedSkill[] {
   // Skill installation paths are provider knowledge and intentionally stay inside this adapter.
   // An empty list (the baseline arm) seeds nothing, matching the no-skill comparison arm.
-  if (skills.length === 0) return;
+  if (skills.length === 0) return [];
   const skillsRoot = join(workspace, SKILLS_ROOT);
+  const staged: StagedSkill[] = [];
   mkdirSync(skillsRoot, { recursive: true });
   for (const skill of skills) {
     // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
     // the arm being graded (see stageSkill).
-    stageSkill(skillsRoot, skill.name, skill.directory);
+    staged.push(stageSkill(skillsRoot, skill.name, skill.directory));
   }
+  return staged;
 }
 
 // Writes the instruction arm's ambient file. The runner supplies the filename from per-executor

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Trace } from "../types.js";
 import { isRecord, pathTargetsSkillMarkdown } from "../utils.js";
-import { stageSkill } from "./seed.js";
+import { type StagedSkill, stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
 import {
   assertEffortSupported,
@@ -35,19 +35,28 @@ export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = 
 // seeds exactly this arm's set on top. pi loads explicit --skill paths even under --no-skills
 // (verified against pi's resource loader), so the empty baseline sees no skills and the solo arm
 // sees only the target.
+// Stages one skill and records its manifest, so teardown deletes exactly what was written.
+function stagePi(root: string, skill: SeededSkill, staged?: StagedSkill[]): string {
+  const result = stageSkill(root, skill.name, skill.directory);
+  staged?.push(result);
+  return result.target;
+}
+
 // See claude.ts SKILLS_ROOT.
 export const SKILLS_ROOT = ".skillval-skills";
 
-export function piSkillArgs(seededSkills: readonly SeededSkill[], stagingRoot?: string): string[] {
+export function piSkillArgs(
+  seededSkills: readonly SeededSkill[],
+  stagingRoot?: string,
+  staged?: StagedSkill[],
+): string[] {
   const args = ["--no-skills"];
   for (const skill of seededSkills) {
     // pi loads a skill from a directory path, so the path handed over must be a staged copy that
     // omits the eval definition - otherwise the graded arm can read its own answer key.
     args.push(
       "--skill",
-      stagingRoot === undefined
-        ? skill.directory
-        : stageSkill(stagingRoot, skill.name, skill.directory),
+      stagingRoot === undefined ? skill.directory : stagePi(stagingRoot, skill, staged),
     );
   }
   return args;
@@ -115,7 +124,8 @@ export class PiExecutor implements Executor {
     // this arm's set. Instruction-file isolation is handled separately, below.
     const skillStaging = join(request.workspace, SKILLS_ROOT);
     mkdirSync(skillStaging, { recursive: true });
-    const arm = piSkillArgs(request.seededSkills, skillStaging);
+    const staged: StagedSkill[] = [];
+    const arm = piSkillArgs(request.seededSkills, skillStaging, staged);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
     const selection: string[] = [];
     if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);
@@ -173,7 +183,7 @@ export class PiExecutor implements Executor {
       const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
       throwNeverGraded("pi -p", result.status, result.signal, detail);
     }
-    return trace;
+    return { ...trace, stagedPaths: staged };
   }
 }
 
@@ -211,7 +221,11 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
 }
 
 // stopReason values that mean the model produced an answer worth grading.
-const GRADEABLE_STOP_REASONS = new Set(["stop", "length", "toolUse", "tool_use", "max_tokens"]);
+// pi normalizes provider stop reasons to exactly: stop | length | toolUse | error | aborted.
+// Only the three that mean an answer exists are listed. Raw PROVIDER spellings (tool_use,
+// max_tokens) are deliberately absent: accepting them would reopen the fail-closed boundary for a
+// malformed trace that never went through pi's normalization.
+const GRADEABLE_STOP_REASONS = new Set(["stop", "length", "toolUse"]);
 
 // Whether the LAST assistant message reports a turn that finished with an answer worth grading.
 //

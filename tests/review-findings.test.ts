@@ -24,6 +24,7 @@ import { SKILLS_ROOT as codexSkillsRoot } from "../src/executors/codex.js";
 import { parsePiTrace, SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
 import { stagedRelativePaths, stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
 import { ExecutorInfraError } from "../src/executors/spawn.js";
+import { removeStaged } from "../src/runner.js";
 import { pathContains, skillContentHash } from "../src/utils.js";
 
 const directories: string[] = [];
@@ -312,5 +313,80 @@ describe("second review, finding 3: frontmatter rewriting must not corrupt the s
     const result = withoutInvocationOptOut(source);
     expect(result.changed).toBe(false);
     expect(result.text).toBe(source);
+  });
+});
+
+describe("third review: teardown deletes only what staging recorded writing", () => {
+  it("never follows a symlink a model planted where a staged directory was", () => {
+    // A model can replace a staged directory with a symlink pointing anywhere. A recursive delete
+    // would follow it and destroy files OUTSIDE the workspace with skillval's own privileges.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    mkdirSync(join(source, "references"), { recursive: true });
+    writeFileSync(join(source, "references", "detail.md"), "# detail\n");
+
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+
+    // The model swaps the staged directory for a link to something precious.
+    const outside = makeDir();
+    writeFileSync(join(outside, "precious.txt"), "do not delete\n");
+    rmSync(join(staged.target, "references"), { force: true, recursive: true });
+    symlinkSync(outside, join(staged.target, "references"));
+
+    removeStaged([staged]);
+    expect(existsSync(join(outside, "precious.txt"))).toBe(true);
+  });
+
+  it("removes a staged path even when the model overwrote it, and says so deliberately", () => {
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# original\n");
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+    // Staging wrote SKILL.md; the model overwrites it. Ownership by pathname alone would delete
+    // the model's version, so the arm would lose its own output and fail where baseline passes.
+    writeFileSync(join(staged.target, "SKILL.md"), "# rewritten by the model\n");
+    removeStaged([staged]);
+    // Deleted, because it is still a file staging recorded writing - the collision policy is
+    // "staging owns the path it wrote". Pinned so the choice is deliberate rather than accidental.
+    expect(existsSync(join(staged.target, "SKILL.md"))).toBe(false);
+  });
+
+  it("leaves a directory staging did not create", () => {
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+    // A fixture directory inside the staged root, which staging never recorded.
+    mkdirSync(join(staged.target, "from-the-fixture"), { recursive: true });
+    removeStaged([staged]);
+    expect(existsSync(join(staged.target, "from-the-fixture"))).toBe(true);
+  });
+});
+
+describe("third review: a symlinked skill is rejected before the cache is consulted", () => {
+  it("throws from skillContentHash, which runs upstream of the cache lookup", () => {
+    // Rejecting only at staging time is too late: staging runs AFTER the cache lookup, so a
+    // symlink added to an already-cached skill returns the cached verdict and is never rejected.
+    const source = makeDir();
+    const external = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    writeFileSync(join(external, "shared.md"), "# shared\n");
+    symlinkSync(join(external, "shared.md"), join(source, "shared.md"));
+    expect(() => skillContentHash(source)).toThrow(/symlink/);
+  });
+});
+
+describe("third review: an alias-valued opt-out still opts out", () => {
+  it("removes the key when its value is an alias resolving to true", () => {
+    // document.get() resolves an Alias to a node, not to `true`, so the early return fired and the
+    // skill stayed hidden from Claude with nothing reporting it.
+    const source = "---\nflag: &flag true\ndisable-model-invocation: *flag\n---\n\n# Body\n";
+    const result = withoutInvocationOptOut(source);
+    expect(result.changed).toBe(true);
+    expect(result.text).not.toContain("disable-model-invocation");
   });
 });
