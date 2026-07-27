@@ -44,6 +44,18 @@ export function loadoutHash(
 // Directories that never contribute to content identity or workspace materialization.
 export const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set([".git", "node_modules"]);
 
+// Whether `child` sits strictly inside `parent`, comparing whole path segments and accepting both
+// separators. A `startsWith(parent + "/")` test is POSIX-only - it never matches a Windows path, so
+// every staged file would stay in the graded text and the seeded-skill leak would return silently -
+// and it also treats a lookalike sibling ("s-other" under "s") as contained.
+export function pathContains(parent: string, child: string): boolean {
+  const split = (path: string): string[] => path.split(/[/\\]+/).filter((part) => part !== "");
+  const from = split(parent);
+  const into = split(child);
+  if (into.length <= from.length) return false;
+  return from.every((part, index) => into[index] === part);
+}
+
 export function walkFiles(root: string): string[] {
   const files: string[] = [];
 

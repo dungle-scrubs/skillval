@@ -10,6 +10,8 @@
  */
 import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { isRecord, SKIPPED_DIRECTORIES } from "../utils.js";
 
 // The eval definition is the test, not the skill. It is excluded from what a trial can see, and
 // from the skill's content hash, because neither the model nor the cache should treat a change to
@@ -28,9 +30,13 @@ export const SKILL_STAGING_ROOTS: readonly string[] = [
   ".skillval-skills",
 ];
 
-// Frontmatter key that hides a skill from automatic invocation. Matched on its own line inside the
-// leading `---` block.
-const DISABLE_MODEL_INVOCATION = /^disable-model-invocation:[ \t]*true[ \t]*\r?\n/m;
+// The leading `---` block of a SKILL.md, and the key that hides a skill from automatic invocation.
+// Frontmatter is located structurally and its value parsed as YAML rather than text-matched: the
+// value can be spelled True or TRUE, can carry a trailing comment, and the same line can appear in
+// the BODY inside a fenced example, where rewriting it would change what the skill teaches.
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n/;
+const OPT_OUT_KEY = "disable-model-invocation";
+const OPT_OUT_LINE = /^disable-model-invocation[ \t]*:.*(\r?\n|$)/m;
 
 /**
  * Whether a SKILL.md opts out of automatic invocation, and the text with that opt-out removed.
@@ -52,8 +58,21 @@ const DISABLE_MODEL_INVOCATION = /^disable-model-invocation:[ \t]*true[ \t]*\r?\
  * cannot happen. Those cases are tautologies and belong in neither corpus.
  */
 export function withoutInvocationOptOut(source: string): { changed: boolean; text: string } {
-  const text = source.replace(DISABLE_MODEL_INVOCATION, "");
-  return { changed: text !== source, text };
+  const block = FRONTMATTER.exec(source);
+  if (block === null) return { changed: false, text: source };
+  const [matched, body = ""] = block;
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(body);
+  } catch {
+    // Malformed frontmatter is left exactly as authored: rewriting something skillval cannot parse
+    // is how a staging step corrupts a skill.
+    return { changed: false, text: source };
+  }
+  if (!isRecord(parsed) || parsed[OPT_OUT_KEY] !== true) return { changed: false, text: source };
+  const stripped = body.replace(OPT_OUT_LINE, "");
+  const rebuilt = matched.replace(body, stripped);
+  return { changed: true, text: source.replace(matched, rebuilt) };
 }
 
 /**
@@ -75,6 +94,11 @@ export function stageSkill(parent: string, name: string, skillDirectory: string)
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(skillDirectory)) {
     if (entry === EVAL_DEFINITION_FILE) continue;
+    // Exactly what skillContentHash ignores. Staging content the cache key cannot see is a
+    // stale-verdict bug: a .git or node_modules under a skill would change what the model reads
+    // without changing its identity, and an unbounded node_modules also makes every trial a large
+    // recursive copy.
+    if (SKIPPED_DIRECTORIES.has(entry)) continue;
     const source = join(skillDirectory, entry);
     const destination = join(target, entry);
     if (entry === SKILL_FILE) {

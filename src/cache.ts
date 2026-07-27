@@ -34,7 +34,12 @@ import { sha256 } from "./utils.js";
 //     the regex graders only; command_exit, ast and tsc still received the raw workspace, so a
 //     case asserting on the whole tree (e.g. `test -z "$(find . -type f)"`) saw skillval's own
 //     staged files in every target-present arm.
-export const RUNNER_VERSION = 22;
+// 23: three review findings that change what a trial sees or how it is keyed. Staging now skips
+//     .git and node_modules so it stages exactly what skillContentHash counts (content the model
+//     could read without changing the cache key was a stale-verdict bug); the invocation opt-out is
+//     removed by parsing frontmatter as YAML, so True/TRUE and trailing comments are honoured and a
+//     fenced example in the body is never rewritten.
+export const RUNNER_VERSION = 23;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
