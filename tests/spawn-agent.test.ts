@@ -145,6 +145,27 @@ describe("spawnAgent process-group containment", () => {
     rmSync(directory, { force: true, recursive: true });
   }, 15_000);
 
+  it("classifies a CLI that cannot be started as infrastructure, with a reason", () => {
+    // spawnSync used to surface ENOENT itself. It now spawns node - which always exists - so the
+    // real failure happens one level down, and the wrapper swallowing it turned a missing CLI into
+    // a silent exit 1 with empty stderr: an unexplained failure that reaches the executors looking
+    // like the agent ran and failed.
+    let thrown: unknown;
+    try {
+      spawnAgent({
+        args: [],
+        command: "skillval-definitely-not-a-real-binary-xyz",
+        env: { PATH: process.env.PATH ?? "" },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
+    expect((thrown as ExecutorInfraError).kind).toBe("process-failed");
+    // Names the command that could not start, not the wrapper that reported it.
+    expect((thrown as Error).message).toContain("skillval-definitely-not-a-real-binary-xyz");
+  });
+
   it("kills the group when the agent is killed for exceeding its timeout", async () => {
     // The timeout path reaps through a different mechanism than a normal exit: spawnSync signals
     // the WRAPPER, which has to trap it and take the group down on its way out. A timed-out trial

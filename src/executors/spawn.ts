@@ -129,7 +129,12 @@ export interface SpawnAgentOptions {
 // stdio, and reaps the group on exit or on a signal. The wrapper is what spawnSync waits for, so
 // this whole path stays synchronous. The pid file is belt and braces for the paths the wrapper
 // cannot trap - SIGKILL from an ENOBUFS abort leaves it no chance to run its own cleanup.
+// Marker the wrapper prints when it cannot start the agent at all, so that failure keeps the typed
+// classification spawnSync's own ENOENT used to give it.
+const WRAPPER_SPAWN_FAILED = "skillval-wrapper: failed to spawn";
+
 const GROUP_WRAPPER = `
+const WRAPPER_SPAWN_FAILED = ${JSON.stringify("skillval-wrapper: failed to spawn")};
 const { spawn } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
 // slice(1), not slice(2): under node -e there is no script filename, so the first user
@@ -147,7 +152,13 @@ const reap = () => { try { process.kill(-child.pid, "SIGKILL"); } catch {} };
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(signal, () => { reap(); process.exit(1); });
 }
-child.on("error", () => process.exit(1));
+child.on("error", (error) => {
+  // Reported, not swallowed. Without this a missing or unexecutable CLI became a silent exit 1
+  // with empty stderr: spawnSync used to surface ENOENT directly, but it now spawns node, which
+  // always exists, so the real failure happens one level down where nobody could see it.
+  process.stderr.write(WRAPPER_SPAWN_FAILED + " " + command + ": " + error.message + "\\n");
+  process.exit(127);
+});
 child.on("exit", (code, signal) => { reap(); process.exit(signal !== null ? 1 : (code ?? 1)); });
 `;
 
@@ -191,6 +202,14 @@ export function spawnAgent(options: SpawnAgentOptions): AgentProcessResult {
   const error = result.error as NodeJS.ErrnoException | undefined;
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
+  if (stderr.includes(WRAPPER_SPAWN_FAILED)) {
+    // The agent never started, so nothing about the skill was tested. Same classification spawnSync
+    // gave this before the wrapper existed, when it could report ENOENT itself.
+    throw new ExecutorInfraError(
+      stderr.slice(stderr.indexOf(WRAPPER_SPAWN_FAILED)).trim(),
+      "process-failed",
+    );
+  }
   if (error?.code === "ETIMEDOUT") {
     throw new ExecutorInfraError(
       `${options.command} timed out after ${Math.round(timeoutMs / 1000)}s`,
