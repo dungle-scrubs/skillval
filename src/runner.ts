@@ -1331,15 +1331,15 @@ function runTrial(
       skillName: context.skill.name,
       workspace,
     });
-    // Exclude what seeding staged: a staged skill is copied into the workspace, so generation mode
-    // would otherwise grade skillval's own input as if the model had written it.
-    const checks = gradeTrial(
-      context.evalCase,
-      arm,
-      trace,
-      workspace,
-      stagedSkillPaths(workspace, seeded),
-    );
+    // Remove what seeding staged BEFORE grading. A staged skill is copied into the workspace, so
+    // every grader would otherwise see skillval's own input as if the model had written it - not
+    // just the regex graders, but command_exit, ast and tsc, which receive the raw workspace and
+    // cannot be filtered after the fact (command_exit runs arbitrary shell against the tree).
+    // Removing the exact staged directories, never the whole skills root, so a skill the MODEL
+    // authored under the same root is still graded (create-skill's cases depend on that).
+    const staged = stagedSkillPaths(workspace, seeded);
+    for (const path of staged) rmSync(path, { force: true, recursive: true });
+    const checks = gradeTrial(context.evalCase, arm, trace, workspace, staged);
     return {
       checks,
       fixtureSetup,

@@ -174,3 +174,25 @@ describe("SKILL_STAGING_ROOTS covers every executor", () => {
     }
   });
 });
+
+describe("staged skills are removed before grading", () => {
+  it("leaves a model-authored skill under the same root intact", () => {
+    // The teardown removes the EXACT staged directories, never the whole skills root: create-skill's
+    // cases grade a skill the model itself authored, which lands under that same root. Removing the
+    // root wholesale would delete the output being graded.
+    const workspace = makeDir();
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# seeded\n");
+    seedClaudeSkills(workspace, [{ directory: source, name: "seeded" }]);
+
+    const authored = join(workspace, ".claude/skills/authored-by-model");
+    mkdirSync(authored, { recursive: true });
+    writeFileSync(join(authored, "SKILL.md"), "# authored\n");
+
+    // Simulate the runner's teardown: only the staged path.
+    rmSync(join(workspace, ".claude/skills/seeded"), { force: true, recursive: true });
+
+    expect(existsSync(join(workspace, ".claude/skills/seeded"))).toBe(false);
+    expect(existsSync(join(authored, "SKILL.md"))).toBe(true);
+  });
+});
