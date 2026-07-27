@@ -234,9 +234,12 @@ const GRADEABLE_STOP_REASONS = new Set(["stop", "length", "toolUse"]);
 // the exact class of false verdict the check exists to prevent. Unknown reasons are infrastructure
 // until someone looks at them, which is loud and recoverable rather than silent and cached.
 //
-// The trade this accepts: if pi ever adds a reason meaning "the model refused", that is real model
-// BEHAVIOUR and belongs in a verdict, not in infrastructure. Adding it here would be a deliberate
-// decision, which is the point - the classification should never be a default.
+// KNOWN LIMITATION, not an oversight. pi's Anthropic adapter maps a genuine model REFUSAL onto the
+// normalized reason "error", which this treats as infrastructure. So a refusal the skill itself
+// provoked is excluded from the vote rather than graded as the model behaviour it is. pi's
+// normalized union carries no provenance to tell the two apart, so distinguishing them needs
+// either a pi change or structured error details it does not currently expose. Recorded here so
+// the next reader knows it is a boundary of the data, not a missing branch.
 function endedGradeably(messages: readonly unknown[]): boolean {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];

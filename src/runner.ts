@@ -1388,7 +1388,7 @@ function runTrial(
     try {
       checks = gradeTrial(context.evalCase, arm, trace, graded, []);
     } finally {
-      rmSync(graded, { force: true, recursive: true });
+      discard(graded);
     }
     return {
       checks,
@@ -1401,7 +1401,21 @@ function runTrial(
   } finally {
     // Trials may contain generated source or credentials-related environment state. Always clean
     // both directories, including executor and grader failure paths.
-    rmSync(workspace, { force: true, recursive: true });
-    rmSync(trialHome, { force: true, recursive: true });
+    //
+    // Best-effort on purpose. This runs in a `finally`, so a throw here would replace whatever the
+    // trial actually concluded - a permission change or a filesystem race would surface as the
+    // trial's result, and outside the catch above it could abort the whole run. Disposal of a temp
+    // directory is never a statement about the skill.
+    discard(workspace);
+    discard(trialHome);
+  }
+}
+
+// Removes a temporary directory, never letting its failure become a trial outcome.
+function discard(directory: string): void {
+  try {
+    rmSync(directory, { force: true, recursive: true });
+  } catch {
+    // The OS reclaims it; a leaked temp directory is not worth failing a measured trial for.
   }
 }
