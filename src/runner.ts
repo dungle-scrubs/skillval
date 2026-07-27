@@ -1,7 +1,9 @@
 /** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -10,12 +12,11 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { AblationVariants } from "./ablate.js";
 import { AblationError, ablateRule } from "./ablate.js";
 import type { ArmCacheIdentity } from "./cache.js";
@@ -1344,30 +1345,111 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
  * command_exit grader - which runs arbitrary shell - a path out of the tree, including back into
  * the model's own live workspace.
  */
-function dropEscapingLinks(directory: string, root: string, workspace: string): void {
+/**
+ * Resolves a path through whichever of its ancestors actually exist.
+ *
+ * `realpathSync` throws on a path whose leaf is missing, and a link target need not exist. Walking
+ * up to the deepest existing ancestor gives the canonical prefix while keeping the rest verbatim.
+ */
+function canonicalize(path: string): string {
+  let existing = path;
+  const trailing: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return path;
+    trailing.unshift(basename(existing));
+    existing = parent;
+  }
+  return join(realpathSync(existing), ...trailing);
+}
+
+function dropEscapingLinks(
+  directory: string,
+  root: string,
+  workspace: string,
+  finalPath: string,
+): void {
   // Compared against REAL paths. On macOS /tmp is itself a symlink to /private/tmp, so an absolute
   // link written by the model resolves to the /private form while the workspace path does not -
   // and a naive comparison classifies the model's own output as an escape and deletes it.
   const realRoot = realpathSync(root);
   const realWorkspace = existsSync(workspace) ? realpathSync(workspace) : workspace;
+  // Both spellings, because a link target is whatever the model literally wrote. On macOS the
+  // workspace lives under /tmp, which is itself a link to /private/tmp: realpath gives the private
+  // form while the model's own `ln -s "$PWD/x"` gives the public one. Comparing a lexical target
+  // against a canonical prefix alone classifies the model's own output as an escape and deletes it.
+  const roots = [realRoot, root];
+  const workspaces = [realWorkspace, workspace];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isSymbolicLink()) {
-      const target = resolve(directory, readlinkSync(path));
-      if (target === realRoot || pathContains(realRoot, target)) continue;
+      const written = resolve(directory, readlinkSync(path));
+      // Canonicalized through the deepest ancestor that exists, so a link pointing THROUGH another
+      // symlink is judged on where it really lands rather than on how it was spelled.
+      const target = canonicalize(written);
+      if (roots.some((base) => target === base || pathContains(base, target))) continue;
       // An ABSOLUTE link the model wrote inside the workspace points at the live tree, which the
       // copy is not. Repointing it at the equivalent path here keeps the link meaningful instead of
       // deleting output that was never trying to escape.
-      if (pathContains(realWorkspace, target)) {
+      const home = workspaces.find((base) => target === base || pathContains(base, target));
+      if (home !== undefined) {
+        // Repointed at the path this tree will OCCUPY once installed, not the temporary one it is
+        // being built at - the temporary path stops existing the moment it is renamed into place,
+        // which would leave every rewritten link dangling while graders run.
         rmSync(path, { force: true });
-        symlinkSync(join(root, relative(realWorkspace, target)), path);
+        symlinkSync(join(finalPath, relative(home, target)), path);
         continue;
       }
       rmSync(path, { force: true });
       continue;
     }
-    if (entry.isDirectory()) dropEscapingLinks(path, root, workspace);
+    if (entry.isDirectory()) dropEscapingLinks(path, root, workspace, finalPath);
   }
+}
+
+/**
+ * Whether every component between `root` and `path` is a real directory rather than a symlink.
+ *
+ * Subtraction happens by pathname, and a pathname is only trustworthy if nothing along it can
+ * redirect. Checking the leaf alone is what made every earlier version unsafe: a staged DIRECTORY
+ * replaced by a link to somewhere holding identical bytes would have its target deleted instead.
+ */
+/**
+ * Removes a path inside the graded copy even when its parent directory is not writable.
+ *
+ * Modes are copied faithfully, so a skill shipping a read-only directory produces a copy whose
+ * staged files cannot be unlinked. Failing there would leave the skill's own text in the tree and
+ * hand it to the grader as model output. The parent's mode is restored either way, because a
+ * `test -w` case can observe it.
+ */
+function removeFromCopy(path: string): void {
+  try {
+    rmSync(path, { force: true, recursive: true });
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EACCES") throw error;
+  }
+  const parent = dirname(path);
+  const mode = lstatSync(parent, { throwIfNoEntry: false })?.mode;
+  if (mode === undefined) return;
+  chmodSync(parent, mode | 0o200);
+  try {
+    rmSync(path, { force: true, recursive: true });
+  } finally {
+    chmodSync(parent, mode);
+  }
+}
+
+function reachableWithoutLinks(root: string, path: string): boolean {
+  const parts = relative(root, path)
+    .split(sep)
+    .filter((part) => part !== "");
+  let walked = root;
+  for (const part of parts.slice(0, -1)) {
+    walked = join(walked, part);
+    if (lstatSync(walked, { throwIfNoEntry: false })?.isDirectory() !== true) return false;
+  }
+  return true;
 }
 
 export function prepareGradingTree(workspace: string, staged: readonly StagedSkill[]): string {
@@ -1376,16 +1458,32 @@ export function prepareGradingTree(workspace: string, staged: readonly StagedSki
   try {
     // dereference:false keeps symlinks as symlinks; without it a link would be replaced by a copy
     // of its target, which is both lossy and a way out of the workspace.
-    cpSync(workspace, root, { dereference: false, preserveTimestamps: true, recursive: true });
+    // KNOWN LIMIT - hard-link identity is not preserved: two names for one inode become two
+    // independent files, so `test a -ef b` passes in the model's tree and fails in the graded copy.
+    // Preserving it needs an inode map across the whole walk. Untaken because no case shape in the
+    // suite tests inode identity, and the failure is a visible FAIL rather than a silent wrong
+    // verdict - which is the failure mode this whole subsystem exists to prevent.
+    cpSync(workspace, root, {
+      dereference: false,
+      preserveTimestamps: true,
+      recursive: true,
+      // Without this cpSync path-resolves relative link targets, so a relative link stops being
+      // relative and starts pointing at the source tree.
+      verbatimSymlinks: true,
+    });
     for (const skill of staged) {
       for (const file of skill.created) {
         const inCopy = join(root, relative(workspace, file.path));
+        // Every component checked with lstat, not just the leaf. A model can replace a staged
+        // DIRECTORY with a link to another directory holding identical bytes; following it would
+        // delete unrelated output, and the leaf-level check cannot see that.
+        if (!reachableWithoutLinks(root, inCopy)) continue;
         // Only while the bytes still match what staging wrote. The moment the model edits a staged
         // file it is output, and output is graded.
-        const stats = statSync(inCopy, { throwIfNoEntry: false });
+        const stats = lstatSync(inCopy, { throwIfNoEntry: false });
         if (stats === undefined || !stats.isFile()) continue;
         if (sha256(readFileSync(inCopy)) !== file.hash) continue;
-        rmSync(inCopy, { force: true });
+        removeFromCopy(inCopy);
       }
       // Only directories staging itself created, and only while empty - never every empty
       // directory, which would delete the model's own. Deepest first, by path depth rather than by
@@ -1396,13 +1494,14 @@ export function prepareGradingTree(workspace: string, staged: readonly StagedSki
       );
       for (const directory of deepestFirst) {
         const inCopy = join(root, relative(workspace, directory));
-        const stats = statSync(inCopy, { throwIfNoEntry: false });
+        if (!reachableWithoutLinks(root, inCopy)) continue;
+        const stats = lstatSync(inCopy, { throwIfNoEntry: false });
         if (stats?.isDirectory() !== true) continue;
         if (readdirSync(inCopy).length > 0) continue;
-        rmSync(inCopy, { force: true, recursive: true });
+        removeFromCopy(inCopy);
       }
     }
-    dropEscapingLinks(root, root, workspace);
+    dropEscapingLinks(root, root, workspace, workspace);
   } catch (error) {
     // Nothing about the skill has been graded when preparation fails, so it must not vote or be
     // cached - and the half-built copy must not leak.
@@ -1442,19 +1541,28 @@ function runTrial(
     // see prepareGradingTree.
     const prepared = prepareGradingTree(workspace, staged);
     const parked = `${workspace}.live`;
+    // Tracked explicitly, because an unconditional cleanup here would delete the model's LIVE tree
+    // whenever the first rename failed - it was never parked, so `workspace` still WAS the live
+    // tree. Each flag says which path this code currently owns.
+    let liveParked = false;
+    let gradedInstalled = false;
     let checks: Check[];
     try {
       renameSync(workspace, parked);
+      liveParked = true;
       renameSync(join(prepared, "tree"), workspace);
+      gradedInstalled = true;
       checks = gradeTrial(context.evalCase, arm, trace, workspace, []);
     } finally {
-      discard(workspace);
-      // Put the model's own tree back where the outer cleanup expects to find it.
-      try {
-        renameSync(parked, workspace);
-      } catch {
-        // Already gone, or never moved because preparation failed first.
+      if (gradedInstalled) discard(workspace);
+      if (liveParked) {
+        try {
+          renameSync(parked, workspace);
+        } catch {
+          // Leave it parked; the outer cleanup discards both pathnames.
+        }
       }
+      discard(parked);
       discard(prepared);
     }
     return {

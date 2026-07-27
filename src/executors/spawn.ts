@@ -111,6 +111,15 @@ export interface SpawnAgentOptions {
   readonly timeoutMs?: number;
 }
 
+// KNOWN LIMIT - no descendant containment. spawnSync returns when the CLI it launched exits, which
+// says nothing about helpers that CLI forked; a surviving background writer could still mutate the
+// workspace while it is being snapshotted and graded. There is no sync fix: spawnSync IGNORES
+// `detached`, so the child never becomes a process-group leader and `kill(-pid)` returns ESRCH
+// (measured both ways - a backgrounded `sleep 1; touch` survived identically with and without it).
+// Real containment needs the async `spawn` plus a group kill, which means making this whole path
+// async. Untaken because no supported agent CLI daemonizes, and a comment claiming containment that
+// does not contain is worse than a documented gap.
+//
 // Runs an agent CLI once and captures its output, translating the two capture-layer failure modes
 // (output overflow, timeout) into a typed ExecutorInfraError. A normal nonzero exit is returned as
 // data for the caller to interpret, since each executor phrases that differently.

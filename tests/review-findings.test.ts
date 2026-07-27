@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -337,12 +338,16 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     // the leaf-level guard.
     const outside = makeDir();
     mkdirSync(join(outside, "references"), { recursive: true });
-    writeFileSync(join(outside, "references", "detail.md"), "precious\n");
+    // Byte-IDENTICAL to what staging wrote. With different bytes the hash check alone declines the
+    // deletion, so the test passed against a leaf-only implementation and proved nothing. Matching
+    // bytes make the component-by-component walk the only thing standing between this file and
+    // rmSync.
+    writeFileSync(join(outside, "references", "detail.md"), "# detail\n");
     rmSync(join(staged.target, "references"), { force: true, recursive: true });
     symlinkSync(join(outside, "references"), join(staged.target, "references"));
 
     const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
-    expect(readFileSync(join(outside, "references", "detail.md"), "utf8")).toBe("precious\n");
+    expect(readFileSync(join(outside, "references", "detail.md"), "utf8")).toBe("# detail\n");
     // The ESCAPING link is dropped, so a command_exit grader cannot traverse out of the tree -
     // while an internal link survives, which the next test pins.
     expect(existsSync(join(snapshot, ".claude/skills/s/references"))).toBe(false);
@@ -388,10 +393,24 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     // A symlink survives AS a symlink. fixture.ts tells authors to create links in setup, so
     // erasing them made `test -L` cases impossible to pass.
     expect(lstatSync(join(snapshot, "current.ts")).isSymbolicLink()).toBe(true);
-    // The provider skills root held nothing but staged input, so it must not appear - otherwise a
-    // raw-workspace grader sees a directory in the solo arm that the baseline never had.
+    // And it still RESOLVES once the tree occupies the pathname it is graded at. Checking only
+    // that a link survived passed against a version that repointed every link at the temporary
+    // build directory, which stops existing the moment the tree is installed - every link dangled
+    // exactly when graders ran, and no assertion here could see it.
+    // Asserted before the swap below moves the snapshot onto the workspace pathname.
     expect(existsSync(join(snapshot, ".claude"))).toBe(false);
-    rmSync(snapshot, { force: true, recursive: true });
+    const parked = `${workspace}.live`;
+    renameSync(workspace, parked);
+    renameSync(snapshot, workspace);
+    try {
+      expect(readFileSync(join(workspace, "current.ts"), "utf8")).toContain("export const x");
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+      renameSync(parked, workspace);
+    }
+    // The provider skills root held nothing but staged input, so it must not appear - otherwise a
+    // raw-workspace grader sees a directory in the solo arm that the baseline never had. Checked
+    // above, before the snapshot was renamed into place.
   });
 });
 
