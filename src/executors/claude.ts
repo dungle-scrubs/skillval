@@ -80,11 +80,13 @@ export class ClaudeExecutor implements Executor {
     const trace = parseClaudeTrace(result.stdout, request.skillName);
     if (result.status !== 0) {
       throwIfProviderUnavailable("claude", `${result.stderr}\n${result.stdout.slice(-2000)}`);
-      // Grade a nonzero exit only when the turn actually completed; otherwise nothing was graded
-      // and the trial is infrastructure. Observed live on opus, which exits 1 with an EMPTY stderr
-      // often enough that the old path recorded a run of real answers as a failing arm.
-      if (!trace.completed)
-        throwNeverGraded("claude -p", result.status, result.signal, result.stderr.slice(-500));
+    }
+    // A completed turn is what makes a trial gradeable, and the exit status does not decide that.
+    // A nonzero exit AFTER the model finished still holds a real answer (observed on opus, which
+    // exits 1 with an empty stderr); a ZERO exit with an empty, truncated or unfamiliar trace
+    // graded nothing at all, and was previously recorded as a content failure and cached.
+    if (!trace.completed) {
+      throwNeverGraded("claude -p", result.status, result.signal, result.stderr.slice(-500));
     }
 
     return trace;
@@ -95,11 +97,16 @@ function defaultConfigDirectory(): string {
   return process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 }
 
+// Where this executor stages seeded skills, relative to the trial workspace. Exported so the
+// runner can exclude and tear down exactly what THIS run staged - never another executor's root,
+// which would delete model output that happens to live there.
+export const SKILLS_ROOT = ".claude/skills";
+
 export function seedSkills(workspace: string, skills: readonly SeededSkill[]): void {
   // Skill installation paths are provider knowledge and intentionally stay inside this adapter.
   // An empty list (the baseline arm) seeds nothing, matching the no-skill comparison arm.
   if (skills.length === 0) return;
-  const skillsRoot = join(workspace, ".claude/skills");
+  const skillsRoot = join(workspace, SKILLS_ROOT);
   mkdirSync(skillsRoot, { recursive: true });
   for (const skill of skills) {
     // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
@@ -176,6 +183,7 @@ export function detectClaude(realConfigDirectory = defaultConfigDirectory()): Ex
     invocationDetection: CLAUDE_INVOCATION_DETECTION,
     model,
     name: "claude",
+    skillsRoot: SKILLS_ROOT,
     thinking,
     version,
   };

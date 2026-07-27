@@ -8,6 +8,10 @@ export interface ExecutorMetadata {
   readonly invocationDetection: "structured" | "heuristic";
   readonly model: string;
   readonly name: string;
+  // Where this executor stages seeded skills, relative to the trial workspace. The runner both
+  // excludes and tears down staged paths before grading, and it must touch only the root THIS
+  // executor used - deleting another executor's root would destroy model output living there.
+  readonly skillsRoot: string;
   // The thinking/effort level in effect for this run, or "default" when neither an override nor the
   // provider configuration sets one. When --effort is passed it holds the requested level; otherwise
   // it records what the harness would do. Either way it is tied to results and cache identity.

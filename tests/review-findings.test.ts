@@ -8,8 +8,14 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { seedSkills as seedClaudeSkills } from "../src/executors/claude.js";
-import { withoutInvocationOptOut } from "../src/executors/seed.js";
+import {
+  SKILLS_ROOT as claudeSkillsRoot,
+  seedSkills as seedClaudeSkills,
+} from "../src/executors/claude.js";
+import { SKILLS_ROOT as codexSkillsRoot } from "../src/executors/codex.js";
+import { SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
+import { stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
+import { ExecutorInfraError } from "../src/executors/spawn.js";
 import { pathContains, skillContentHash } from "../src/utils.js";
 
 const directories: string[] = [];
@@ -101,5 +107,47 @@ describe("finding 7: staged-path containment must not be POSIX-only", () => {
     expect(pathContains(seeded, "/tmp/ws/.claude/skills/s/SKILL.md")).toBe(true);
     expect(pathContains(seeded, "/tmp/ws/.claude/skills/s-other/SKILL.md")).toBe(false);
     expect(pathContains(seeded, seeded)).toBe(false);
+  });
+});
+
+describe("finding 5: a staging failure is infrastructure, not a verdict", () => {
+  it("raises a typed infra error when the skill directory cannot be read", () => {
+    // cpSync/readdir can fail on permissions, ENOSPC, dangling links or special files - all before
+    // the model runs. Copy staging introduced far more of these than symlinking did, and an
+    // ordinary Error becomes a cached `run` FAIL that votes against the skill.
+    let thrown: unknown;
+    try {
+      stageSkill(makeDir(), "s", join(tmpdir(), "skillval-no-such-skill-dir-xyz"));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
+    expect((thrown as ExecutorInfraError).kind).toBe("staging-failed");
+  });
+
+  it("raises it for a dangling symlink inside the skill, which copy cannot resolve", () => {
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    symlinkSync(join(tmpdir(), "skillval-missing-target-xyz"), join(source, "broken.md"));
+
+    let thrown: unknown;
+    try {
+      stageSkill(makeDir(), "s", source);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
+  });
+});
+
+describe("finding 6: only the executor's own staging root may be touched", () => {
+  it("reports the root each executor actually stages into", () => {
+    // The runner both EXCLUDES and DELETES staged paths. Using every known root means a codex run
+    // deletes model output at .claude/skills/<name> before grading it - the create-skill case
+    // authors skills under exactly that path.
+    expect(claudeSkillsRoot).toBe(".claude/skills");
+    expect(codexSkillsRoot).toBe(".agents/skills");
+    expect(piSkillsRoot).toBe(".skillval-skills");
+    expect(new Set([claudeSkillsRoot, codexSkillsRoot, piSkillsRoot]).size).toBe(3);
   });
 });

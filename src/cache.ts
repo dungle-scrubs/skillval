@@ -39,7 +39,12 @@ import { sha256 } from "./utils.js";
 //     could read without changing the cache key was a stale-verdict bug); the invocation opt-out is
 //     removed by parsing frontmatter as YAML, so True/TRUE and trailing comments are honoured and a
 //     fenced example in the body is never rewritten.
-export const RUNNER_VERSION = 23;
+// 24: four more review findings. A trial with no completed turn is infrastructure whatever the
+//     exit status (a ZERO exit with a truncated trace was graded as content and cached); a staging
+//     failure before the model runs is infrastructure rather than a FAIL voting against the skill;
+//     and staged-path exclusion/teardown now uses the ACTIVE executor's root instead of every
+//     known root, which could delete model output living under another executor's path.
+export const RUNNER_VERSION = 24;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

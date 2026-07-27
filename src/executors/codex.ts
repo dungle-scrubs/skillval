@@ -92,10 +92,10 @@ export class CodexExecutor implements Executor {
     if (result.status !== 0) {
       // Quota/auth refusals arrive on stdout as turn.failed events; check both streams.
       throwIfProviderUnavailable("codex", `${result.stderr}\n${result.stdout.slice(-2000)}`);
-      // A nonzero exit that still completed its turn is a gradeable answer; one that did not
-      // graded nothing, and must not be recorded as a content FAIL.
-      if (!trace.completed)
-        throwNeverGraded("codex exec", result.status, result.signal, result.stderr.slice(-500));
+    }
+    // Completion, not exit status, decides whether anything was graded - see claude.ts.
+    if (!trace.completed) {
+      throwNeverGraded("codex exec", result.status, result.signal, result.stderr.slice(-500));
     }
 
     return trace;
@@ -121,11 +121,14 @@ function prepareCleanCodexHome(home: string, realHome: string): string {
   return cleanHome;
 }
 
+// See claude.ts SKILLS_ROOT.
+export const SKILLS_ROOT = ".agents/skills";
+
 export function seedSkills(workspace: string, skills: readonly SeededSkill[]): void {
   // Skill installation paths are provider knowledge and intentionally stay inside this adapter.
   // An empty list (the baseline arm) seeds nothing, matching the no-skill comparison arm.
   if (skills.length === 0) return;
-  const skillsRoot = join(workspace, ".agents/skills");
+  const skillsRoot = join(workspace, SKILLS_ROOT);
   mkdirSync(skillsRoot, { recursive: true });
   for (const skill of skills) {
     // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
@@ -152,6 +155,7 @@ export function detectCodex(realHome = homedir()): ExecutorMetadata {
     invocationDetection: CODEX_INVOCATION_DETECTION,
     model,
     name: "codex",
+    skillsRoot: SKILLS_ROOT,
     thinking,
     version,
   };

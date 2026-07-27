@@ -45,6 +45,7 @@ const executor = (model: string, thinking: string): RunReport["executor"] => ({
   invocationDetection: "structured",
   model,
   name: "claude",
+  skillsRoot: ".claude/skills",
   thinking,
   version: "1.0.0",
 });
