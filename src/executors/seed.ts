@@ -6,9 +6,9 @@
  * must_not_match traps. Only target-present arms are seeded, so the leak is ASYMMETRIC - the solo
  * arm can read the answer key while its baseline cannot, which inflates load-bearing verdicts in
  * exactly one direction. Every arm now gets a staged directory that mirrors the skill's real
- * contents by symlink, minus the eval definition.
+ * contents by copy, minus the eval definition.
  */
-import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // The eval definition is the test, not the skill. It is excluded from what a trial can see, and
@@ -47,11 +47,18 @@ export function withoutInvocationOptOut(source: string): { changed: boolean; tex
 }
 
 /**
- * Creates `<parent>/<name>` and links every child of the skill directory into it except the eval
- * definition. Children are linked individually rather than the directory being copied, so a
- * reference the skill loads on demand still resolves to the real file. SKILL.md is copied instead
- * of linked when it opts out of automatic invocation, so the staged copy can drop that opt-out
- * without touching the user's file.
+ * Creates `<parent>/<name>` and COPIES every child of the skill directory into it except the eval
+ * definition.
+ *
+ * Copied, not symlinked, because codex does not discover a skill whose SKILL.md is a symlink: a
+ * symlinked skill produced no file read and no skill mention at all, while the same skill copied
+ * into place was read and followed. Every codex target-present arm was therefore identical to its
+ * own baseline. Claude is unaffected - it resolves symlinked skills normally (observed invoking on
+ * 31 of 55 graded trigger trials while staging still symlinked) - but staging is shared, so it
+ * copies for everyone rather than branching per executor.
+ *
+ * SKILL.md is written rather than copied so the staged text can drop the automatic-invocation
+ * opt-out without touching the user's file.
  */
 export function stageSkill(parent: string, name: string, skillDirectory: string): string {
   const target = join(parent, name);
@@ -59,14 +66,13 @@ export function stageSkill(parent: string, name: string, skillDirectory: string)
   for (const entry of readdirSync(skillDirectory)) {
     if (entry === EVAL_DEFINITION_FILE) continue;
     const source = join(skillDirectory, entry);
+    const destination = join(target, entry);
     if (entry === SKILL_FILE) {
-      const staged = withoutInvocationOptOut(readFileSync(source, "utf8"));
-      if (staged.changed) {
-        writeFileSync(join(target, entry), staged.text);
-        continue;
-      }
+      writeFileSync(destination, withoutInvocationOptOut(readFileSync(source, "utf8")).text);
+      continue;
     }
-    symlinkSync(source, join(target, entry));
+    // Recursive so a references/ tree the skill loads on demand is staged whole.
+    cpSync(source, destination, { recursive: true });
   }
   return target;
 }

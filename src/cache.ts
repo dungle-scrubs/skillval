@@ -23,7 +23,10 @@ import { sha256 } from "./utils.js";
 // 19: staging strips `disable-model-invocation: true` from SKILL.md. Claude Code withholds such a
 //     skill from the model entirely, so a target-present arm was identical to its own baseline and
 //     every case on those skills was unfalsifiable - their cached verdicts measured nothing.
-export const RUNNER_VERSION = 19;
+// 20: skills are staged by COPY, not symlink. codex does not discover a skill whose SKILL.md is a
+//     symlink, so every codex target-present arm was identical to its own baseline and no codex
+//     verdict on a seeded skill measured anything.
+export const RUNNER_VERSION = 20;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
