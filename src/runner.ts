@@ -3,6 +3,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -16,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:path";
 import type { AblationVariants } from "./ablate.js";
 import { AblationError, ablateRule } from "./ablate.js";
 import type { ArmCacheIdentity } from "./cache.js";
@@ -1363,6 +1364,61 @@ function canonicalize(path: string): string {
   return join(realpathSync(existing), ...trailing);
 }
 
+/**
+ * Where a link text really lands, following each component in order.
+ *
+ * `resolve()` and `join()` collapse `..` LEXICALLY, before any earlier component is followed. With
+ * `pivot -> .` and `escape -> pivot/..`, that collapse cancels `pivot` against `..` and reports the
+ * link as pointing at its own directory. The kernel does the opposite: it follows `pivot` to the
+ * directory it names, and only then applies `..` - so the link reaches the PARENT, which is where
+ * the model's live tree is parked. Canonicalizing before each step is what makes the two agree.
+ */
+function resolveThroughLinks(base: string, text: string): string {
+  let walked = isAbsolute(text) ? parse(text).root : base;
+  for (const part of text.split(sep)) {
+    if (part === "" || part === ".") continue;
+    walked = canonicalize(walked);
+    walked = part === ".." ? dirname(walked) : join(walked, part);
+  }
+  return canonicalize(walked);
+}
+
+/**
+ * Restores hard-link identity that `cpSync` does not preserve.
+ *
+ * Two names for one inode arrive in the copy as two independent files, so `test a -ef b` answers
+ * differently in the graded tree than in the model's own - and the inverted case is worse than a
+ * spurious failure: a baseline arm asserting `! test a -ef b` PASSES against the split copy and
+ * turns a working rule into a prune candidate. Rebuilding the links keeps the copy faithful.
+ */
+function preserveHardLinks(source: string, root: string): void {
+  const firstByInode = new Map<string, string>();
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const stats = lstatSync(path, { throwIfNoEntry: false });
+      if (stats === undefined || stats.nlink < 2) continue;
+      const key = `${stats.dev}:${stats.ino}`;
+      const inCopy = join(root, relative(source, path));
+      const first = firstByInode.get(key);
+      if (first === undefined) {
+        firstByInode.set(key, inCopy);
+        continue;
+      }
+      if (!existsSync(inCopy) || !existsSync(first)) continue;
+      rmSync(inCopy, { force: true });
+      linkSync(first, inCopy);
+    }
+  };
+  walk(source);
+}
+
 function dropEscapingLinks(
   directory: string,
   root: string,
@@ -1383,14 +1439,18 @@ function dropEscapingLinks(
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isSymbolicLink()) {
-      const written = resolve(directory, readlinkSync(path));
-      // Canonicalized through the deepest ancestor that exists, so a link pointing THROUGH another
-      // symlink is judged on where it really lands rather than on how it was spelled.
-      const target = canonicalize(written);
+      const text = readlinkSync(path);
+      // Judged on where it really lands rather than on how it was spelled.
+      const target = resolveThroughLinks(directory, text);
       if (roots.some((base) => target === base || pathContains(base, target))) continue;
       // An ABSOLUTE link the model wrote inside the workspace points at the live tree, which the
       // copy is not. Repointing it at the equivalent path here keeps the link meaningful instead of
       // deleting output that was never trying to escape.
+      // Already correct at the pathname this tree is graded at, so leave the text ALONE. Rewriting
+      // it through the canonical target silently edits model output: `$PWD/alias/file` would become
+      // `$PWD/real/file`, and a `readlink` grader comparing against what the model wrote fails on a
+      // link that was working.
+      if (isAbsolute(text) && (text === finalPath || pathContains(finalPath, text))) continue;
       const home = workspaces.find((base) => target === base || pathContains(base, target));
       if (home !== undefined) {
         // Repointed at the path this tree will OCCUPY once installed, not the temporary one it is
@@ -1417,10 +1477,15 @@ function dropEscapingLinks(
 /**
  * Removes a path inside the graded copy even when its parent directory is not writable.
  *
- * Modes are copied faithfully, so a skill shipping a read-only directory produces a copy whose
- * staged files cannot be unlinked. Failing there would leave the skill's own text in the tree and
- * hand it to the grader as model output. The parent's mode is restored either way, because a
- * `test -w` case can observe it.
+ * Defensive rather than load-bearing. Two reviews called for this on the premise that the copy
+ * preserves directory modes; measured, it does not - cpSync brings a 0555 directory back as 0755,
+ * so the copy is always writable and this retry has no reachable trigger through it. Kept because
+ * the cost is a caught EACCES and the failure it guards against is the skill's own text surviving
+ * into the graded tree as model output. The mode is restored either way: a `test -w` case can see
+ * it.
+ *
+ * KNOWN LIMIT, from the same measurement - directory modes are NOT faithful in the copy. A case
+ * asserting a mode reads 0755 where the model's own tree had something else.
  */
 function removeFromCopy(path: string): void {
   try {
@@ -1441,9 +1506,18 @@ function removeFromCopy(path: string): void {
 }
 
 function reachableWithoutLinks(root: string, path: string): boolean {
-  const parts = relative(root, path)
-    .split(sep)
-    .filter((part) => part !== "");
+  const rest = relative(root, path);
+  // Containment first: an empty relative (the path IS root), an absolute one, or anything leading
+  // with `..` walked happily out of the tree.
+  //
+  // Defense in depth, and deliberately unaccompanied by a regression test. Every caller reaches
+  // this through `join(root, relative(workspace, manifestPath))`, which lands an escaping manifest
+  // entry back inside the harness's own temp directory rather than at the path it names - so an
+  // attempt to build the exploit produced a test that passed with this guard REMOVED. A green test
+  // asserting a property its subject does not have is worse than none. The guard stays because it
+  // is one comparison and the remap is not a property this function should have to rely on.
+  if (rest === "" || isAbsolute(rest) || rest === ".." || rest.startsWith(`..${sep}`)) return false;
+  const parts = rest.split(sep).filter((part) => part !== "");
   let walked = root;
   for (const part of parts.slice(0, -1)) {
     walked = join(walked, part);
@@ -1458,11 +1532,6 @@ export function prepareGradingTree(workspace: string, staged: readonly StagedSki
   try {
     // dereference:false keeps symlinks as symlinks; without it a link would be replaced by a copy
     // of its target, which is both lossy and a way out of the workspace.
-    // KNOWN LIMIT - hard-link identity is not preserved: two names for one inode become two
-    // independent files, so `test a -ef b` passes in the model's tree and fails in the graded copy.
-    // Preserving it needs an inode map across the whole walk. Untaken because no case shape in the
-    // suite tests inode identity, and the failure is a visible FAIL rather than a silent wrong
-    // verdict - which is the failure mode this whole subsystem exists to prevent.
     cpSync(workspace, root, {
       dereference: false,
       preserveTimestamps: true,
@@ -1501,6 +1570,7 @@ export function prepareGradingTree(workspace: string, staged: readonly StagedSki
         removeFromCopy(inCopy);
       }
     }
+    preserveHardLinks(workspace, root);
     dropEscapingLinks(root, root, workspace, workspace);
   } catch (error) {
     // Nothing about the skill has been graded when preparation fails, so it must not vote or be
@@ -1540,7 +1610,10 @@ function runTrial(
     // Graded from a faithful copy with staged input removed, standing at the workspace's own path -
     // see prepareGradingTree.
     const prepared = prepareGradingTree(workspace, staged);
-    const parked = `${workspace}.live`;
+    // Parked inside the harness's OWN temp directory rather than at `${workspace}.live`. That
+    // pathname sits in the model's parent directory, where the model can create something there
+    // first - and then cleanup would recursively delete a path the harness never acquired.
+    const parked = join(prepared, "live");
     // Tracked explicitly, because an unconditional cleanup here would delete the model's LIVE tree
     // whenever the first rename failed - it was never parked, so `workspace` still WAS the live
     // tree. Each flag says which path this code currently owns.
@@ -1548,10 +1621,21 @@ function runTrial(
     let gradedInstalled = false;
     let checks: Check[];
     try {
-      renameSync(workspace, parked);
-      liveParked = true;
-      renameSync(join(prepared, "tree"), workspace);
-      gradedInstalled = true;
+      try {
+        renameSync(workspace, parked);
+        liveParked = true;
+        renameSync(join(prepared, "tree"), workspace);
+        gradedInstalled = true;
+      } catch (error) {
+        // Infrastructure, never content. Nothing has been graded at this point, so letting this
+        // fall through as an ordinary trial error would make it VOTE and be CACHED: a solo arm
+        // becomes a false FAIL, and a baseline failing this way stops disqualifying a no-op.
+        // Either way a working rule gets deleted on evidence that was never collected.
+        throw new ExecutorInfraError(
+          `could not install the grading tree: ${error instanceof Error ? error.message : String(error)}`,
+          "grading-tree",
+        );
+      }
       checks = gradeTrial(context.evalCase, arm, trace, workspace, []);
     } finally {
       if (gradedInstalled) discard(workspace);
@@ -1559,10 +1643,9 @@ function runTrial(
         try {
           renameSync(parked, workspace);
         } catch {
-          // Leave it parked; the outer cleanup discards both pathnames.
+          // Leave it parked; `prepared` is discarded next and takes it with it.
         }
       }
-      discard(parked);
       discard(prepared);
     }
     return {

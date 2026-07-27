@@ -20,6 +20,7 @@ export const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
 // shows a completed turn; an exit that completed nothing is infrastructure too (throwNeverGraded).
 export class ExecutorInfraError extends Error {
   public readonly kind:
+    | "grading-tree"
     | "output-too-large"
     | "process-failed"
     | "provider-unavailable"
@@ -29,6 +30,7 @@ export class ExecutorInfraError extends Error {
   public constructor(
     message: string,
     kind:
+      | "grading-tree"
       | "output-too-large"
       | "process-failed"
       | "provider-unavailable"

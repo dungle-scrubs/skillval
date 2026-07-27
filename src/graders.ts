@@ -164,6 +164,16 @@ export function runGraders(evalCase: GradableCase, workspace: string): readonly 
 
 const COMMAND_EXIT_TIMEOUT_MS = 120_000;
 
+// A grading command is often a whole inlined script, and repeating 4KB of it in every failure
+// detail buries the one line that says WHY. The command is already in the case file; the detail
+// exists to carry what the run learned.
+function abbreviate(command: string): string {
+  const line = command.trim().split("\n")[0] ?? "";
+  return line.length > 60
+    ? `${line.slice(0, 60)}...`
+    : `${line}${command.includes("\n") ? "..." : ""}`;
+}
+
 function gradeCommandExit(workspace: string, config: CommandExitGraderConfig): GraderCheck {
   const expected = config.expect ?? 0;
   // Minimal environment and SIGKILL on timeout mirror fixture setup: nothing inherited beyond PATH,
@@ -186,28 +196,28 @@ function gradeCommandExit(workspace: string, config: CommandExitGraderConfig): G
       ? `timed out after ${COMMAND_EXIT_TIMEOUT_MS / 1000}s`
       : outcome.error.message;
     return {
-      detail: `command "${config.command}" failed to run: ${reason}`,
+      detail: `command "${abbreviate(config.command)}" failed to run: ${reason}`,
       name: "command_exit",
       pass: false,
     };
   }
   if (outcome.signal !== null) {
     return {
-      detail: `command "${config.command}" terminated by ${outcome.signal}`,
+      detail: `command "${abbreviate(config.command)}" terminated by ${outcome.signal}`,
       name: "command_exit",
       pass: false,
     };
   }
   if (outcome.status === expected) {
     return {
-      detail: `command "${config.command}" exited ${expected}`,
+      detail: `command "${abbreviate(config.command)}" exited ${expected}`,
       name: "command_exit",
       pass: true,
     };
   }
   const stderr = outcome.stderr === "" ? "" : `: ${outcome.stderr.slice(0, 300)}`;
   return {
-    detail: `command "${config.command}" exited ${outcome.status}, expected ${expected}${stderr}`,
+    detail: `command "${abbreviate(config.command)}" exited ${outcome.status}, expected ${expected}${stderr}`,
     name: "command_exit",
     pass: false,
   };

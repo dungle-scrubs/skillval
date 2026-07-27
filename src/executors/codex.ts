@@ -145,7 +145,7 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): S
   for (const skill of skills) {
     // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
     // the arm being graded (see stageSkill).
-    const one = stageSkill(skillsRoot, skill.name, skill.directory);
+    const one = stageSkill(skillsRoot, skill.name, skill.directory, workspace);
     staged.push({ ...one, directories: [...roots, ...one.directories] });
   }
   return staged;
