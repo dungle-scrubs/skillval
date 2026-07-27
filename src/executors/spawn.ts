@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 // spawnSync buffers the child's entire stdout in memory. A runaway generation (observed: GLM-5.2
 // emitting multi-hundred-MB to multi-GB `--mode json` traces when a skill is seeded) overflows that
@@ -113,29 +116,69 @@ export interface SpawnAgentOptions {
   readonly timeoutMs?: number;
 }
 
-// KNOWN LIMIT - no descendant containment. spawnSync returns when the CLI it launched exits, which
-// says nothing about helpers that CLI forked; a surviving background writer could still mutate the
-// workspace while it is being snapshotted and graded. There is no sync fix: spawnSync IGNORES
-// `detached`, so the child never becomes a process-group leader and `kill(-pid)` returns ESRCH
-// (measured both ways - a backgrounded `sleep 1; touch` survived identically with and without it).
-// Real containment needs the async `spawn` plus a group kill, which means making this whole path
-// async. Untaken because no supported agent CLI daemonizes, and a comment claiming containment that
-// does not contain is worse than a documented gap.
+// Runs the agent as its own process-group LEADER and kills the whole group when it exits.
 //
+// spawnSync returns when the CLI it launched exits, which says nothing about what that CLI forked -
+// and the evaluated model does not need the CLI to daemonize to exploit this. It can run
+// `(sleep 5; echo x > out.ts) &` in one bash call, finish its turn, and have that writer mutate the
+// workspace WHILE the tree is being snapshotted and graded. Measured: without this wrapper the
+// backgrounded writer lands its file; with it, it does not.
+//
+// spawnSync ignores `detached` (measured - `kill(-pid)` returns ESRCH either way), so the group is
+// created by a wrapper: a `node -e` process that spawns the real command detached, forwards its
+// stdio, and reaps the group on exit or on a signal. The wrapper is what spawnSync waits for, so
+// this whole path stays synchronous. The pid file is belt and braces for the paths the wrapper
+// cannot trap - SIGKILL from an ENOBUFS abort leaves it no chance to run its own cleanup.
+const GROUP_WRAPPER = `
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+// slice(1), not slice(2): under node -e there is no script filename, so the first user
+// argument sits at argv[1]. slice(2) silently dropped the pid file and ran the agent with
+// its own command name as the first argument.
+const [pidFile, command, ...args] = process.argv.slice(1);
+const child = spawn(command, args, { detached: true, stdio: ["inherit", "inherit", "inherit"] });
+if (child.pid !== undefined) writeFileSync(pidFile, String(child.pid));
+const reap = () => { try { process.kill(-child.pid, "SIGKILL"); } catch {} };
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+  process.on(signal, () => { reap(); process.exit(1); });
+}
+child.on("error", () => process.exit(1));
+child.on("exit", (code, signal) => { reap(); process.exit(signal !== null ? 1 : (code ?? 1)); });
+`;
+
+// Kills the agent's process group by the pid the wrapper recorded. ESRCH - the group is already
+// empty - is the normal outcome and means the agent left nothing behind.
+function reapGroup(pidFile: string): void {
+  try {
+    const pid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+    if (Number.isFinite(pid) && pid > 1) process.kill(-pid, "SIGKILL");
+  } catch {
+    // No pid file (the wrapper never got that far) or the group is gone.
+  }
+  rmSync(pidFile, { force: true });
+}
+
 // Runs an agent CLI once and captures its output, translating the two capture-layer failure modes
 // (output overflow, timeout) into a typed ExecutorInfraError. A normal nonzero exit is returned as
 // data for the caller to interpret, since each executor phrases that differently.
 export function spawnAgent(options: SpawnAgentOptions): AgentProcessResult {
   const maxOutputBytes = options.maxOutputBytes ?? AGENT_MAX_OUTPUT_BYTES;
   const timeoutMs = options.timeoutMs ?? AGENT_TIMEOUT_MS;
-  const result = spawnSync(options.command, [...options.args], {
-    cwd: options.cwd,
-    encoding: "utf8",
-    env: options.env,
-    ...(options.closeStdin === true ? { input: "" } : {}),
-    maxBuffer: maxOutputBytes,
-    timeout: timeoutMs,
-  });
+  const pidFile = join(mkdtempSync(join(tmpdir(), "skillval-group-")), "pid");
+  const result = spawnSync(
+    process.execPath,
+    ["-e", GROUP_WRAPPER, "--", pidFile, options.command, ...options.args],
+    {
+      cwd: options.cwd,
+      encoding: "utf8",
+      env: options.env,
+      ...(options.closeStdin === true ? { input: "" } : {}),
+      maxBuffer: maxOutputBytes,
+      timeout: timeoutMs,
+    },
+  );
+  reapGroup(pidFile);
+  rmSync(dirname(pidFile), { force: true, recursive: true });
   const error = result.error as NodeJS.ErrnoException | undefined;
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";

@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execPath } from "node:process";
 import { describe, expect, it } from "vitest";
 import {
@@ -117,4 +120,28 @@ describe("throwNeverGraded", () => {
     expect(thrown).toBeInstanceOf(ExecutorInfraError);
     expect((thrown as ExecutorInfraError).kind).toBe("process-failed");
   });
+});
+
+describe("spawnAgent process-group containment", () => {
+  it("kills a writer the agent backgrounded before returning", async () => {
+    // The model does not need the CLI to daemonize: one bash call running
+    // `(sleep N; write) &` outlives the turn and mutates the workspace WHILE the tree is being
+    // snapshotted and graded. spawnSync returns as soon as the CLI exits, so without the group
+    // wrapper nothing stands between that writer and the graded tree.
+    const directory = mkdtempSync(join(tmpdir(), "skillval-group-test-"));
+    const marker = join(directory, "written-after-the-turn.txt");
+
+    const result = spawnAgent({
+      args: ["-c", `(sleep 2; touch ${marker}) & echo done`],
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    expect(result.stdout).toContain("done");
+    expect(result.status).toBe(0);
+
+    // Well past the writer's delay: if the group survived, the file is there.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(existsSync(marker)).toBe(false);
+    rmSync(directory, { force: true, recursive: true });
+  }, 15_000);
 });
