@@ -30,7 +30,11 @@ import { sha256 } from "./utils.js";
 //     SKILL.md in the workspace, so generation mode graded skillval's input as model output - a
 //     must_not_match trap fired on the skill's prose, and a must_match could pass on text the
 //     model never wrote.
-export const RUNNER_VERSION = 21;
+// 22: staged skills are REMOVED from the workspace before grading. Version 21 excluded them from
+//     the regex graders only; command_exit, ast and tsc still received the raw workspace, so a
+//     case asserting on the whole tree (e.g. `test -z "$(find . -type f)"`) saw skillval's own
+//     staged files in every target-present arm.
+export const RUNNER_VERSION = 22;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
