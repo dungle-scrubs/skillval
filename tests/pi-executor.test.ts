@@ -55,8 +55,23 @@ describe("prepareCleanPiHome", () => {
 
 const line = (value: unknown): string => JSON.stringify(value);
 
+// Real pi transcripts carry a stopReason on every assistant message (verified against a live
+// trace), and parsePiTrace now requires a gradeable one - an absent reason fails closed rather than
+// being graded as content. The fixture stamps "stop" on assistant messages that do not set their
+// own, so these tests exercise the parser rather than the completion gate.
 const agentEnd = (messages: unknown[]): string =>
-  line({ messages, type: "agent_end", willRetry: false });
+  line({
+    messages: messages.map((message) =>
+      typeof message === "object" &&
+      message !== null &&
+      (message as { role?: unknown }).role === "assistant" &&
+      !("stopReason" in message)
+        ? { ...message, stopReason: "stop" }
+        : message,
+    ),
+    type: "agent_end",
+    willRetry: false,
+  });
 
 const usage = { input: 100, output: 20, totalTokens: 120 };
 

@@ -53,7 +53,11 @@ import { sha256 } from "./utils.js";
 //     rather than only the top level; and a symlink inside a skill is rejected instead of staged,
 //     because walkFiles counts neither a link nor its target and external content could change
 //     what the model reads without changing the cache key.
-export const RUNNER_VERSION = 26;
+// 27: teardown removes only the files staging wrote, so a fixture file or model output living
+//     inside the staged skill directory survives to be graded; and pi's completion check became an
+//     allow-list of gradeable stop reasons, so an unfamiliar or missing reason fails closed as
+//     infrastructure instead of being graded as content and cached.
+export const RUNNER_VERSION = 27;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

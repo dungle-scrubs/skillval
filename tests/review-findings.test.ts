@@ -22,7 +22,7 @@ import {
 } from "../src/executors/claude.js";
 import { SKILLS_ROOT as codexSkillsRoot } from "../src/executors/codex.js";
 import { parsePiTrace, SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
-import { stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
+import { stagedRelativePaths, stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
 import { ExecutorInfraError } from "../src/executors/spawn.js";
 import { pathContains, skillContentHash } from "../src/utils.js";
 
@@ -209,10 +209,14 @@ describe("finding 4b: pi's agent_end is not by itself a completed turn", () => {
     );
   });
 
-  it("keeps grading an unfamiliar stopReason, rather than inventing an infra failure", () => {
-    // Deny-list, not allow-list: a reason this code has never seen must behave as it always did.
+  it("treats an unfamiliar or missing stopReason as NOT completed", () => {
+    // Second review, finding 6: this was a deny-list and so failed OPEN. A reason pi renames, or a
+    // malformed event with no stopReason at all, would have been graded as content and cached.
+    // Failing closed is loud and recoverable; failing open is silent and poisons the cache.
+    expect(parsePiTrace(trace({ stopReason: "something-new" }), "s").completed).toBe(false);
+    expect(parsePiTrace(trace({}), "s").completed).toBe(false);
+    // Known-gradeable reasons still grade.
     expect(parsePiTrace(trace({ stopReason: "length" }), "s").completed).toBe(true);
-    expect(parsePiTrace(trace({}), "s").completed).toBe(true);
   });
 });
 
@@ -232,5 +236,32 @@ describe("second review, finding 2: pi must not grade a zero-exit errored turn",
     expect(guard).toBeGreaterThan(exitBranch);
     const branchBody = source.slice(exitBranch, guard);
     expect(branchBody).not.toContain("throwNeverGraded");
+  });
+});
+
+describe("second review, finding 1: teardown must spare fixture and model output", () => {
+  it("removes only the files staging wrote, inside the staged directory", () => {
+    // rmSync on the staged directory also destroyed anything the fixture put there or the model
+    // wrote inside it. A solo arm that loses its own output fails while its baseline passes, which
+    // caseOutcome reads as a no-op - i.e. a prune candidate. stagedRelativePaths derives what
+    // staging created from the source, so teardown can be surgical without tracking state.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    mkdirSync(join(source, "references"), { recursive: true });
+    writeFileSync(join(source, "references", "detail.md"), "# detail\n");
+    writeFileSync(join(source, "skillval.yml"), "cases: []\n");
+
+    const relative = stagedRelativePaths(source);
+    expect(relative.sort()).toEqual(["SKILL.md", "references/detail.md"]);
+    // The eval definition is never staged, so teardown must not expect it.
+    expect(relative).not.toContain("skillval.yml");
+  });
+
+  it("does not claim a path the model added inside the staged directory", () => {
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    // Whatever the model writes has no counterpart in the source, so it is never in the list
+    // teardown deletes.
+    expect(stagedRelativePaths(source)).not.toContain("notes-from-the-model.md");
   });
 });

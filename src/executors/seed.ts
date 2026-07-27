@@ -8,6 +8,7 @@
  * exactly one direction. Every arm now gets a staged directory that mirrors the skill's real
  * contents by copy, minus the eval definition.
  */
+import type { Dirent } from "node:fs";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -111,6 +112,36 @@ function copyTree(source: string, destination: string): void {
     }
     if (entry.isFile()) copyFileSync(from, to);
   }
+}
+
+/**
+ * The paths staging creates for a skill, relative to its staged directory.
+ *
+ * Derived from the source with the same filters staging applies, so it needs no state and cannot
+ * drift from what was actually written. The runner uses it to tear down EXACTLY what the harness
+ * put there: deleting the staged directory wholesale would also destroy a fixture file that lived
+ * at that path, or anything the model itself wrote inside it, and a solo arm that loses its own
+ * output fails while its baseline passes - which reads as a no-op and a prune candidate.
+ */
+export function stagedRelativePaths(skillDirectory: string): string[] {
+  const paths: string[] = [];
+  const walk = (directory: string, prefix: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+      if (prefix === "" && entry.name === EVAL_DEFINITION_FILE) continue;
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) walk(join(directory, entry.name), relative);
+      else if (entry.isFile()) paths.push(relative);
+    }
+  };
+  walk(skillDirectory, "");
+  return paths;
 }
 
 export function stageSkill(parent: string, name: string, skillDirectory: string): string {
