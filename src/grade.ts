@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { runGraders } from "./graders.js";
 import type { Check, EvalCase, RuntimeArm, Trace } from "./types.js";
-import { walkFiles } from "./utils.js";
+import { pathContains, walkFiles } from "./utils.js";
 
 // The arms that seed the target skill, so should_trigger can be graded on them.
 const TARGET_PRESENT_ARMS = new Set<RuntimeArm>(["solo", "group"]);
@@ -58,7 +58,7 @@ export function gradeTrial(
   const gradedText =
     evalCase.mode === "generation"
       ? walkFiles(workspace)
-          .filter((file) => !seededPaths.some((seeded) => file.startsWith(`${seeded}/`)))
+          .filter((file) => !seededPaths.some((seeded) => pathContains(seeded, file)))
           .filter((file) => !INJECTED_FILES.has(relative(workspace, file)))
           .map((file) => `=== ${relative(workspace, file)} ===\n${readFileSync(file, "utf8")}`)
           .join("\n")
