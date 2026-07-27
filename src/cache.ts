@@ -61,7 +61,13 @@ import { sha256 } from "./utils.js";
 //     physical line. A quoted key parsed as the property but survived the line delete, so staging
 //     reported a change while writing byte-identical text and the arm stayed hidden; a leading BOM
 //     hid the frontmatter entirely; and anchors now raise instead of risking a dangling alias.
-export const RUNNER_VERSION = 28;
+// 29: third-review fixes. Teardown now deletes from an immutable manifest staging records as it
+//     writes, with lstat guards - it previously RECONSTRUCTED the list from mutable source state
+//     and would follow a model-planted symlink out of the workspace. Symlinked skills are rejected
+//     at hash time, upstream of the cache, so adding one to a cached skill can no longer return a
+//     stale verdict. An alias-valued opt-out is now detected. pi's allow-list matches pi's real
+//     normalized reasons rather than raw provider spellings.
+export const RUNNER_VERSION = 29;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

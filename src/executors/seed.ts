@@ -9,9 +9,16 @@
  * contents by copy, minus the eval definition.
  */
 import type { Dirent } from "node:fs";
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
-import { parseDocument } from "yaml";
+import { isAlias, parseDocument, visit } from "yaml";
 import { SKIPPED_DIRECTORIES } from "../utils.js";
 import { ExecutorInfraError } from "./spawn.js";
 
@@ -21,6 +28,23 @@ import { ExecutorInfraError } from "./spawn.js";
 export const EVAL_DEFINITION_FILE = "skillval.yml";
 
 const SKILL_FILE = "SKILL.md";
+
+/**
+ * Exactly what staging wrote, recorded as it was written.
+ *
+ * Teardown used to RECONSTRUCT this from the skill source at grading time, which is mutable: a
+ * source file removed mid-trial left its staged copy behind to be graded as model output, and a
+ * source file added mid-trial made teardown delete something staging never wrote. Recording the
+ * truth once removes both, and `directories` distinguishes a directory staging created from one the
+ * fixture supplied - only the former may be pruned.
+ */
+export interface StagedSkill {
+  /** Absolute paths of files staging wrote. */
+  readonly created: readonly string[];
+  /** Absolute paths of directories staging created, outermost first. */
+  readonly directories: readonly string[];
+  readonly target: string;
+}
 
 // The leading `---` block of a SKILL.md, and the key that hides a skill from automatic invocation.
 // Frontmatter is located structurally and its value parsed as YAML rather than text-matched: the
@@ -66,17 +90,34 @@ export function withoutInvocationOptOut(source: string): { changed: boolean; tex
   // Malformed frontmatter is left exactly as authored: rewriting something skillval cannot parse
   // is how a staging step corrupts a skill.
   if (document.errors.length > 0) return { changed: false, text: source };
-  if (!document.has(OPT_OUT_KEY) || document.get(OPT_OUT_KEY) !== true) {
-    return { changed: false, text: source };
-  }
-  // An anchor here may be referenced elsewhere in the document, and deleting its pair would leave a
-  // dangling alias - a skill that no longer parses. Running a trial against a corrupted skill is
-  // worse than not running it, so this raises and the arm becomes visible infrastructure.
-  if (/(^|\s)[&*][A-Za-z0-9_-]+/.test(yaml)) {
-    throw new Error(
-      `frontmatter uses a YAML anchor or alias, so ${OPT_OUT_KEY} cannot be removed without ` +
-        "risking a dangling reference; rewrite the skill's frontmatter without anchors",
-    );
+  if (!document.has(OPT_OUT_KEY)) return { changed: false, text: source };
+  // `get(key, true)` keeps the node, so an ALIAS value is visible rather than silently resolving to
+  // something that is not `true`. `disable-model-invocation: *flag` where `flag` is true opts the
+  // skill out for real, and returning early there left the skill hidden and the arm unfalsifiable.
+  const node: unknown = document.get(OPT_OUT_KEY, true);
+  const value: unknown = isAlias(node)
+    ? node.resolve(document)?.toJSON()
+    : document.get(OPT_OUT_KEY);
+  if (value !== true) return { changed: false, text: source };
+  // Refuse ONLY when the pair being removed OWNS an anchor that something else still references -
+  // deleting that would leave a dangling alias and a skill that no longer parses. A raw text scan
+  // for & or * was tried first and was far too broad: it rejected prose, comments and quoted
+  // strings containing those characters, turning valid skills into hard staging failures. An
+  // alias-VALUED opt-out is safe to remove, since dropping a reference never breaks its anchor.
+  const anchor = isAlias(node) ? undefined : (node as { anchor?: string } | undefined)?.anchor;
+  if (typeof anchor === "string" && anchor !== "") {
+    let referenced = false;
+    visit(document, {
+      Alias(_key, alias) {
+        if (alias.source === anchor) referenced = true;
+      },
+    });
+    if (referenced) {
+      throw new Error(
+        `${OPT_OUT_KEY} carries the YAML anchor &${anchor}, which is referenced elsewhere in the ` +
+          "frontmatter; removing it would leave a dangling alias",
+      );
+    }
   }
 
   document.delete(OPT_OUT_KEY);
@@ -122,8 +163,14 @@ function symlinkRejected(path: string): Error {
   );
 }
 
-function copyTree(source: string, destination: string): void {
+function copyTree(
+  source: string,
+  destination: string,
+  created: string[],
+  directories: string[],
+): void {
   const entries = readdirSync(source, { withFileTypes: true });
+  if (!existsSync(destination)) directories.push(destination);
   mkdirSync(destination, { recursive: true });
   for (const entry of entries) {
     if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
@@ -131,10 +178,13 @@ function copyTree(source: string, destination: string): void {
     const to = join(destination, entry.name);
     if (entry.isSymbolicLink()) throw symlinkRejected(from);
     if (entry.isDirectory()) {
-      copyTree(from, to);
+      copyTree(from, to, created, directories);
       continue;
     }
-    if (entry.isFile()) copyFileSync(from, to);
+    if (entry.isFile()) {
+      copyFileSync(from, to);
+      created.push(to);
+    }
   }
 }
 
@@ -168,7 +218,7 @@ export function stagedRelativePaths(skillDirectory: string): string[] {
   return paths;
 }
 
-export function stageSkill(parent: string, name: string, skillDirectory: string): string {
+export function stageSkill(parent: string, name: string, skillDirectory: string): StagedSkill {
   try {
     return stage(parent, name, skillDirectory);
   } catch (error) {
@@ -184,8 +234,11 @@ export function stageSkill(parent: string, name: string, skillDirectory: string)
   }
 }
 
-function stage(parent: string, name: string, skillDirectory: string): string {
+function stage(parent: string, name: string, skillDirectory: string): StagedSkill {
   const target = join(parent, name);
+  const created: string[] = [];
+  const directories: string[] = [];
+  if (!existsSync(target)) directories.push(target);
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(skillDirectory, { withFileTypes: true })) {
     if (entry.name === EVAL_DEFINITION_FILE) continue;
@@ -199,13 +252,17 @@ function stage(parent: string, name: string, skillDirectory: string): string {
     if (entry.isSymbolicLink()) throw symlinkRejected(source);
     if (entry.name === SKILL_FILE) {
       writeFileSync(destination, withoutInvocationOptOut(readFileSync(source, "utf8")).text);
+      created.push(destination);
       continue;
     }
     // Directories are walked entry by entry rather than handed to a recursive cpSync, so the skip
     // filter applies at EVERY depth: cpSync would copy references/node_modules, which walkFiles -
     // and so skillContentHash - excludes at every depth.
-    if (entry.isDirectory()) copyTree(source, destination);
-    else if (entry.isFile()) copyFileSync(source, destination);
+    if (entry.isDirectory()) copyTree(source, destination, created, directories);
+    else if (entry.isFile()) {
+      copyFileSync(source, destination);
+      created.push(destination);
+    }
   }
-  return target;
+  return { created, directories, target };
 }

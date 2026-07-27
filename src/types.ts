@@ -1,5 +1,6 @@
 /** Collects normalized trace and evaluation result shapes shared across runtime modules. */
 import type { Arm } from "./case-contract.js";
+import type { StagedSkill } from "./executors/seed.js";
 import type { Verdict } from "./verdict.js";
 
 export type {
@@ -73,5 +74,14 @@ export interface Trace {
   /** The trace evidence that proved skill invocation, or null when none was detected. */
   readonly invocationEvidence: string | null;
   readonly invoked: boolean;
+  /**
+   * Exactly what staging wrote for this trial, recorded as it was written.
+   *
+   * The runner tears these down before grading. It must never RECONSTRUCT the list from the skill
+   * source, which can change during a trial: a removed source file would leave its staged copy to
+   * be graded as model output, and an added one would make teardown delete something staging never
+   * wrote.
+   */
+  readonly stagedPaths?: readonly StagedSkill[];
   readonly usage: unknown;
 }

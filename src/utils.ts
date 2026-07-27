@@ -56,14 +56,19 @@ export function pathContains(parent: string, child: string): boolean {
   return from.every((part, index) => into[index] === part);
 }
 
-export function walkFiles(root: string): string[] {
+export function walkFiles(root: string, symlinks: string[] = []): string[] {
   const files: string[] = [];
 
   function visit(directory: string): void {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
       const path = join(directory, entry.name);
-      if (entry.isDirectory()) visit(path);
+      // A symlink is counted by neither branch below, so its target's bytes never reach the content
+      // hash. Staging rejects symlinked skills - but staging runs AFTER the cache lookup, so a
+      // symlink added to an already-cached skill would return the cached verdict and never be
+      // rejected. Surfacing it here puts the rejection before the cache.
+      if (entry.isSymbolicLink()) symlinks.push(path);
+      else if (entry.isDirectory()) visit(path);
       else if (entry.isFile()) files.push(path);
     }
   }
@@ -76,7 +81,20 @@ export function walkFiles(root: string): string[] {
 // seeded (see stageSkill), and counting it would also bust every cached arm of a skill whenever any
 // one of its cases is edited - the case JSON already keys each case's own arms.
 export function skillContentHash(skillDirectory: string): string {
-  const parts = walkFiles(skillDirectory)
+  const symlinks: string[] = [];
+  const files = walkFiles(skillDirectory, symlinks);
+  // Rejected HERE, not at staging time. A symlink's target contributes no bytes to this hash, so a
+  // symlink added to an already-cached skill would leave the hash unchanged, return the cached
+  // verdict, and never reach the staging check that rejects it. Hashing is upstream of the cache,
+  // so this is the only place the rejection is reachable in every path.
+  const [first] = symlinks;
+  if (first !== undefined) {
+    throw new Error(
+      `${first} is a symlink; a skill must contain only regular files and directories, or its ` +
+        "content hash cannot cover what the model reads",
+    );
+  }
+  const parts = files
     .filter((file) => relative(skillDirectory, file) !== EVAL_DEFINITION_FILE)
     .map((file) => `${relative(skillDirectory, file)}\n${readFileSync(file, "utf8")}`);
   return sha256(parts.join("\0"));
