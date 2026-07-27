@@ -20,7 +20,10 @@ import { sha256 } from "./utils.js";
 // 18: an agent CLI exiting nonzero WITHOUT completing a turn is infrastructure, not a content
 //     failure. Version 16 only caught provider failures that announce themselves in text; an exit
 //     with an empty stderr announced nothing and was cached as a FAIL the model never earned.
-export const RUNNER_VERSION = 18;
+// 19: staging strips `disable-model-invocation: true` from SKILL.md. Claude Code withholds such a
+//     skill from the model entirely, so a target-present arm was identical to its own baseline and
+//     every case on those skills was unfalsifiable - their cached verdicts measured nothing.
+export const RUNNER_VERSION = 19;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
