@@ -9,6 +9,19 @@ import { walkFiles } from "./utils.js";
 const TARGET_PRESENT_ARMS = new Set<RuntimeArm>(["solo", "group"]);
 
 const INJECTED_FILES = new Set(["package.json", "tsconfig.json"]);
+// How much text to show either side of a banned match, so a reader can tell a violation from a
+// correct answer that merely contains the word. Wide enough for a clause, short enough for a log.
+const MATCH_CONTEXT_CHARS = 90;
+
+// Renders a must_not_match hit as the matched text plus its surrounding clause.
+function matchContext(text: string, match: RegExpExecArray): string {
+  const start = Math.max(0, match.index - MATCH_CONTEXT_CHARS);
+  const end = Math.min(text.length, match.index + match[0].length + MATCH_CONTEXT_CHARS);
+  const lead = start > 0 ? "..." : "";
+  const tail = end < text.length ? "..." : "";
+  return `${JSON.stringify(match[0])} in: ${lead}${text.slice(start, end).replace(/\s+/g, " ")}${tail}`;
+}
+
 export function gradeTrial(
   evalCase: EvalCase,
   arm: RuntimeArm,
@@ -51,10 +64,15 @@ export function gradeTrial(
     });
   }
   for (const pattern of evalCase.assert?.must_not_match ?? []) {
+    const match = new RegExp(pattern, "m").exec(gradedText);
     checks.push({
-      detail: pattern,
+      // A failure names WHAT matched and the text around it, never the pattern alone. The pattern
+      // cannot distinguish a real violation ("this is overkill") from a correct answer that happens
+      // to contain the banned word ("not overkill here") - and a trap that fires on correct output
+      // is a whole defect class that stays invisible without the surrounding context.
+      detail: match === null ? pattern : `${pattern} | matched ${matchContext(gradedText, match)}`,
       name: "must_not_match",
-      pass: !new RegExp(pattern, "m").test(gradedText),
+      pass: match === null,
     });
   }
 
