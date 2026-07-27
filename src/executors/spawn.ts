@@ -138,6 +138,11 @@ const { writeFileSync } = require("node:fs");
 const [pidFile, command, ...args] = process.argv.slice(1);
 const child = spawn(command, args, { detached: true, stdio: ["inherit", "inherit", "inherit"] });
 if (child.pid !== undefined) writeFileSync(pidFile, String(child.pid));
+// Reaped from three places on purpose - the child's exit, a trapped signal here, and the pid
+// file back in skillval. They overlap: removing any ONE leaves every test green, because
+// another covers the same path. Removing two does not. Each owns a case the others miss - a
+// trapped SIGTERM with no spawnSync error (an interactive interrupt) never reaches the pid-file
+// backstop, and a SIGKILL never reaches these handlers.
 const reap = () => { try { process.kill(-child.pid, "SIGKILL"); } catch {} };
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(signal, () => { reap(); process.exit(1); });
@@ -177,7 +182,11 @@ export function spawnAgent(options: SpawnAgentOptions): AgentProcessResult {
       timeout: timeoutMs,
     },
   );
-  reapGroup(pidFile);
+  // Only where the wrapper may not have run its own cleanup. On a normal exit it has already
+  // reaped, so firing again would aim kill(-pid) at a group that is gone - and if the OS recycled
+  // that pid in the meantime, at a stranger's process group instead. The wrapper traps SIGTERM,
+  // which is what both the timeout and the overflow abort send, so this is genuinely a backstop.
+  if (result.error !== undefined) reapGroup(pidFile);
   rmSync(dirname(pidFile), { force: true, recursive: true });
   const error = result.error as NodeJS.ErrnoException | undefined;
   const stdout = result.stdout ?? "";

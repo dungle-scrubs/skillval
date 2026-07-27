@@ -144,4 +144,32 @@ describe("spawnAgent process-group containment", () => {
     expect(existsSync(marker)).toBe(false);
     rmSync(directory, { force: true, recursive: true });
   }, 15_000);
+
+  it("kills the group when the agent is killed for exceeding its timeout", async () => {
+    // The timeout path reaps through a different mechanism than a normal exit: spawnSync signals
+    // the WRAPPER, which has to trap it and take the group down on its way out. A timed-out trial
+    // is already infrastructure, but its leftover writer would still be running while the NEXT
+    // trial's tree is graded.
+    const directory = mkdtempSync(join(tmpdir(), "skillval-group-timeout-"));
+    const marker = join(directory, "written-after-the-kill.txt");
+
+    let thrown: unknown;
+    try {
+      spawnAgent({
+        args: ["-c", `(sleep 3; touch ${marker}) & sleep 30`],
+        command: "sh",
+        env: { PATH: process.env.PATH ?? "" },
+        timeoutMs: 1000,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    // Still classified as infrastructure, not as the skill failing.
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
+    expect((thrown as ExecutorInfraError).kind).toBe("timeout");
+
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    expect(existsSync(marker)).toBe(false);
+    rmSync(directory, { force: true, recursive: true });
+  }, 20_000);
 });
