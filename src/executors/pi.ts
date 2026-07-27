@@ -155,12 +155,7 @@ export class PiExecutor implements Executor {
       // stderr is often empty on a pi crash; fall back to stdout and name the signal so a timeout
       // (SIGTERM) is not mistaken for a fast exit. Overflow and timeout are already raised as a
       // typed ExecutorInfraError inside spawnAgent, so this only sees genuine agent-side failures.
-      const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
       throwIfProviderUnavailable("pi", `${result.stderr}\n${result.stdout.slice(-2000)}`);
-      // A nonzero exit or signal that still completed its turn is gradeable; otherwise nothing was
-      // graded and the trial is infrastructure, not a verdict about the skill.
-      if (!parsePiTrace(result.stdout, request.skillName).completed)
-        throwNeverGraded("pi -p", result.status, result.signal, detail);
     }
 
     const trace = parsePiTrace(result.stdout, request.skillName);
@@ -169,6 +164,14 @@ export class PiExecutor implements Executor {
         "pi found no API key for its configured provider; export the provider key " +
           "(e.g. ZAI_API_KEY) in the environment running skillval",
       );
+    }
+    // Completion, not exit status, decides whether anything was graded - matching claude and codex.
+    // pi only sets a failing exit code in text mode, so a JSON-mode turn carrying
+    // stopReason "error"/"aborted" exits 0: gating this on the exit status left exactly the failures
+    // the stopReason check exists to catch being graded as content and cached.
+    if (!trace.completed) {
+      const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
+      throwNeverGraded("pi -p", result.status, result.signal, detail);
     }
     return trace;
   }
