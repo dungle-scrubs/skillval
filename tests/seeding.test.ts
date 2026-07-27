@@ -1,10 +1,10 @@
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -38,7 +38,7 @@ describe.each([
   ["codex", seedCodexSkills, ".agents/skills"],
   ["claude", seedClaudeSkills, ".claude/skills"],
 ])("%s seedSkills", (_name, seedSkills, skillsSubdir) => {
-  it("stages every seeded skill into the skills root, contents linked to the real files", () => {
+  it("stages every seeded skill into the skills root as real files, never symlinks", () => {
     const workspace = makeDir();
     const skillA = makeDir();
     const skillB = makeDir();
@@ -54,8 +54,33 @@ describe.each([
     // wholesale would carry its eval definition into the arm being graded.
     const root = join(workspace, skillsSubdir);
     expect(lstatSync(join(root, "alpha")).isDirectory()).toBe(true);
-    expect(readlinkSync(join(root, "alpha", "SKILL.md"))).toBe(join(skillA, "SKILL.md"));
-    expect(readlinkSync(join(root, "beta", "SKILL.md"))).toBe(join(skillB, "SKILL.md"));
+
+    // A COPY, not a symlink. codex does not discover a skill whose SKILL.md is a symlink, which
+    // made every codex target-present arm identical to its own baseline. lstat, not stat, so a
+    // symlink to a real file cannot pass this.
+    for (const { body, name } of [
+      { body: "# alpha\n", name: "alpha" },
+      { body: "# beta\n", name: "beta" },
+    ]) {
+      const staged = join(root, name, "SKILL.md");
+      expect(lstatSync(staged).isSymbolicLink()).toBe(false);
+      expect(lstatSync(staged).isFile()).toBe(true);
+      expect(readFileSync(staged, "utf8")).toBe(body);
+    }
+  });
+
+  it("stages a references tree whole, so on-demand reads resolve inside the arm", () => {
+    const workspace = makeDir();
+    const skill = makeDir();
+    writeFileSync(join(skill, "SKILL.md"), "# skill\n");
+    mkdirSync(join(skill, "references"), { recursive: true });
+    writeFileSync(join(skill, "references", "detail.md"), "# detail\n");
+
+    seedSkills(workspace, [{ directory: skill, name: "gamma" }]);
+
+    const staged = join(workspace, skillsSubdir, "gamma", "references", "detail.md");
+    expect(lstatSync(staged).isSymbolicLink()).toBe(false);
+    expect(readFileSync(staged, "utf8")).toBe("# detail\n");
   });
 
   it("never carries the eval definition into a seeded arm", () => {
