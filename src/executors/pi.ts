@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Trace } from "../types.js";
+import type { Trace, TrialOutcome } from "../types.js";
 import { isRecord, pathTargetsSkillMarkdown } from "../utils.js";
 import { type StagedSkill, stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
@@ -118,7 +118,7 @@ export class PiExecutor implements Executor {
     };
   }
 
-  public runTrial(request: TrialRequest): Trace {
+  public runTrial(request: TrialRequest): TrialOutcome {
     seedInstruction(request.workspace, request.seededInstruction);
     // Clean skill loading (see piSkillArgs): --no-skills hides the user's library, --skill seeds
     // this arm's set. Instruction-file isolation is handled separately, below.
@@ -183,7 +183,7 @@ export class PiExecutor implements Executor {
       const detail = result.stderr.trim() || result.stdout.slice(-500).trim() || "(no output)";
       throwNeverGraded("pi -p", result.status, result.signal, detail);
     }
-    return { ...trace, stagedPaths: staged };
+    return { staged, trace };
   }
 }
 

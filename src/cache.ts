@@ -72,7 +72,11 @@ import { sha256 } from "./utils.js";
 //     rewrites, meant an intermediate symlink was already followed by the time the leaf was checked.
 //     A staged file is now omitted from the snapshot only while its bytes still match what staging
 //     wrote, so an edited one is graded as the output it is, and symlinks are never reproduced.
-export const RUNNER_VERSION = 30;
+// 31: staging lifecycle is returned separately from the provider trace, so an adapter can no
+//     longer compile while silently omitting it and causing its own seeded input to be graded; and
+//     a skill whose content hash cannot be taken (a symlinked one) is reported as an INVALID skill
+//     at discovery rather than throwing mid-run and aborting every other skill with it.
+export const RUNNER_VERSION = 31;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

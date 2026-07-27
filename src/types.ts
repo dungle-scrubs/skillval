@@ -16,6 +16,18 @@ export type {
 // group and peers arms, which are generated from --loadout and never authored in a case file.
 export type RuntimeArm = Arm | "group" | "peers";
 
+/**
+ * What one trial produced: the provider's own evidence, and what the harness staged to get it.
+ *
+ * Kept apart deliberately. Staging lifecycle used to ride along on `Trace` as an optional field, so
+ * an adapter that returned a plain parsed trace still compiled and silently caused the runner to
+ * grade its own seeded input. Making it a separate, required half means an executor cannot forget.
+ */
+export interface TrialOutcome {
+  readonly staged: readonly StagedSkill[];
+  readonly trace: Trace;
+}
+
 export interface Check {
   readonly detail: string;
   readonly name: string;
@@ -74,14 +86,5 @@ export interface Trace {
   /** The trace evidence that proved skill invocation, or null when none was detected. */
   readonly invocationEvidence: string | null;
   readonly invoked: boolean;
-  /**
-   * Exactly what staging wrote for this trial, recorded as it was written.
-   *
-   * The runner tears these down before grading. It must never RECONSTRUCT the list from the skill
-   * source, which can change during a trial: a removed source file would leave its staged copy to
-   * be graded as model output, and an added one would make teardown delete something staging never
-   * wrote.
-   */
-  readonly stagedPaths?: readonly StagedSkill[];
   readonly usage: unknown;
 }

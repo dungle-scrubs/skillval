@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Trace } from "../types.js";
+import type { Trace, TrialOutcome } from "../types.js";
 import { isRecord } from "../utils.js";
 import { type StagedSkill, stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
@@ -39,7 +39,7 @@ export class ClaudeExecutor implements Executor {
     };
   }
 
-  public runTrial(request: TrialRequest): Trace {
+  public runTrial(request: TrialRequest): TrialOutcome {
     const staged = seedSkills(request.workspace, request.seededSkills);
     seedInstruction(request.workspace, request.seededInstruction);
     // Pass the effective model and effort explicitly so a --model/--effort override wins over the
@@ -89,7 +89,7 @@ export class ClaudeExecutor implements Executor {
       throwNeverGraded("claude -p", result.status, result.signal, result.stderr.slice(-500));
     }
 
-    return { ...trace, stagedPaths: staged };
+    return { staged, trace };
   }
 }
 

@@ -1255,7 +1255,7 @@ function runInstructionTrial(context: InstructionArmContext, arm: RuntimeArm): T
       context.fixture === undefined
         ? undefined
         : applyFixture(context.fixture, workspace, trialHome);
-    const trace = context.executor.runTrial({
+    const { trace } = context.executor.runTrial({
       arm,
       evalCase: context.evalCase,
       home: trialHome,
@@ -1372,7 +1372,7 @@ function runTrial(
       context.fixture === undefined
         ? undefined
         : applyFixture(context.fixture, workspace, trialHome);
-    const trace = context.executor.runTrial({
+    const { staged, trace } = context.executor.runTrial({
       arm,
       evalCase: context.evalCase,
       home: trialHome,
@@ -1381,12 +1381,8 @@ function runTrial(
       workspace,
     });
     // Remove what seeding staged BEFORE grading. A staged skill is copied into the workspace, so
-    // every grader would otherwise see skillval's own input as if the model had written it - not
-    // just the regex graders, but command_exit, ast and tsc, which receive the raw workspace and
-    // cannot be filtered after the fact (command_exit runs arbitrary shell against the tree).
-    // Removing the exact staged directories, never the whole skills root, so a skill the MODEL
-    // authored under the same root is still graded (create-skill's cases depend on that).
-    const staged = trace.stagedPaths ?? [];
+    // Graded from a snapshot that omits unchanged staged input. Nothing in the model's own tree is
+    // touched - see gradingSnapshot for why deleting from it could not be made safe.
     const graded = gradingSnapshot(workspace, staged);
     let checks: Check[];
     try {

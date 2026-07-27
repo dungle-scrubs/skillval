@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Trace } from "../types.js";
+import type { Trace, TrialOutcome } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
 import { type StagedSkill, stageSkill } from "./seed.js";
 import { spawnAgent, throwIfProviderUnavailable, throwNeverGraded } from "./spawn.js";
@@ -48,7 +48,7 @@ export class CodexExecutor implements Executor {
     };
   }
 
-  public runTrial(request: TrialRequest): Trace {
+  public runTrial(request: TrialRequest): TrialOutcome {
     const staged = seedSkills(request.workspace, request.seededSkills);
     seedInstruction(request.workspace, request.seededInstruction);
     const sandbox = request.evalCase.mode === "generation" ? "workspace-write" : "read-only";
@@ -98,7 +98,7 @@ export class CodexExecutor implements Executor {
       throwNeverGraded("codex exec", result.status, result.signal, result.stderr.slice(-500));
     }
 
-    return { ...trace, stagedPaths: staged };
+    return { staged, trace };
   }
 }
 

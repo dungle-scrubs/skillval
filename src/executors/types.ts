@@ -1,5 +1,5 @@
 /** Defines the provider-neutral seam between trial orchestration and executor adapters. */
-import type { EvalCase, RuntimeArm, Trace } from "../types.js";
+import type { EvalCase, RuntimeArm, TrialOutcome } from "../types.js";
 
 export interface ExecutorMetadata {
   // Records how the adapter decides the invoked trigger signal: "structured" means a dedicated
@@ -72,5 +72,5 @@ export interface TrialRequest {
 
 export interface Executor {
   readonly metadata: ExecutorMetadata;
-  runTrial(request: TrialRequest): Trace;
+  runTrial(request: TrialRequest): TrialOutcome;
 }

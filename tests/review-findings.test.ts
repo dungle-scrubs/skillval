@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { discoverSkills } from "../src/discovery.js";
 import {
   SKILLS_ROOT as claudeSkillsRoot,
   seedSkills as seedClaudeSkills,
@@ -402,5 +403,25 @@ describe("third review: an alias-valued opt-out still opts out", () => {
     const result = withoutInvocationOptOut(source);
     expect(result.changed).toBe(true);
     expect(result.text).not.toContain("disable-model-invocation");
+  });
+});
+
+describe("fourth review: a bad skill degrades to invalid, it does not abort the run", () => {
+  it("reports a symlinked skill as an invalid skill rather than throwing mid-run", () => {
+    // skillContentHash throws on a symlinked skill - it cannot cover bytes it never reads - and
+    // that throw used to happen inside an eager map during a run, so ONE bad skill aborted
+    // everything before any valid skill reported anything.
+    const root = makeDir();
+    const skill = join(root, "broken");
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, "SKILL.md"), "---\nname: broken\n---\n\n# Broken\n");
+    writeFileSync(join(skill, "skillval.yml"), "skill: broken\nclass: capability\ncases: []\n");
+    const external = makeDir();
+    writeFileSync(join(external, "shared.md"), "# shared\n");
+    symlinkSync(join(external, "shared.md"), join(skill, "shared.md"));
+
+    const [found] = discoverSkills([root]).skills;
+    expect(found?.status).toBe("invalid");
+    expect(found?.validationError ?? "").toMatch(/symlink/);
   });
 });
