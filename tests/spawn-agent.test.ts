@@ -128,19 +128,56 @@ describe("spawnAgent process-group containment", () => {
     // `(sleep N; write) &` outlives the turn and mutates the workspace WHILE the tree is being
     // snapshotted and graded. spawnSync returns as soon as the CLI exits, so without the group
     // wrapper nothing stands between that writer and the graded tree.
+    //
+    // The redirect to /dev/null is what makes this a real test. The first version let the
+    // background process keep the inherited stdout and stderr, so an UNWRAPPED spawnSync sat
+    // waiting for those descriptors to close and the writer finished before the call even
+    // returned. It failed without the wrapper, but not for the reason it claimed - it never
+    // reproduced a mutation arriving after the turn was over.
     const directory = mkdtempSync(join(tmpdir(), "skillval-group-test-"));
     const marker = join(directory, "written-after-the-turn.txt");
 
+    const started = Date.now();
     const result = spawnAgent({
-      args: ["-c", `(sleep 2; touch ${marker}) & echo done`],
+      args: ["-c", `(sleep 2; touch ${marker}) >/dev/null 2>&1 </dev/null & echo done`],
       command: "sh",
       env: { PATH: process.env.PATH ?? "" },
     });
     expect(result.stdout).toContain("done");
     expect(result.status).toBe(0);
+    // Returned while the writer was still sleeping - so the mutation this guards against really is
+    // a post-turn one, and the assertion below is not just observing a finished write.
+    expect(Date.now() - started).toBeLessThan(1500);
 
-    // Well past the writer's delay: if the group survived, the file is there.
     await new Promise((resolve) => setTimeout(resolve, 3000));
+    expect(existsSync(marker)).toBe(false);
+    rmSync(directory, { force: true, recursive: true });
+  }, 15_000);
+
+  it("kills the group even when the wrapper itself is killed uncatchably", async () => {
+    // SIGKILL cannot be trapped, so the wrapper's own handlers never run. The parent used to skip
+    // its backstop here because it keyed on `result.error`, which is UNDEFINED for a signalled
+    // child - spawnSync reports `signal` instead. The group survived, and nothing noticed.
+    const directory = mkdtempSync(join(tmpdir(), "skillval-group-kill-"));
+    const marker = join(directory, "written-after-the-wrapper-died.txt");
+
+    const result = spawnAgent({
+      args: [
+        "-c",
+        // The agent exits immediately after killing the wrapper. Keeping it alive with a trailing
+        // `sleep` held the stdout pipe open, so spawnSync did not return until well after the
+        // writer had already fired and the test measured nothing.
+        `(sleep 4; touch ${marker}) >/dev/null 2>&1 </dev/null & kill -9 $PPID`,
+      ],
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    // The wrapper died without cleaning up, so the pid token survived and the parent acted on it.
+    expect(result.signal === "SIGKILL" || result.status !== 0).toBe(true);
+
+    // Must outlast the writer's own delay. Waiting less than it made the assertion fire before the
+    // write could have happened, so the test passed with no containment at all.
+    await new Promise((resolve) => setTimeout(resolve, 6000));
     expect(existsSync(marker)).toBe(false);
     rmSync(directory, { force: true, recursive: true });
   }, 15_000);
@@ -162,8 +199,51 @@ describe("spawnAgent process-group containment", () => {
     }
     expect(thrown).toBeInstanceOf(ExecutorInfraError);
     expect((thrown as ExecutorInfraError).kind).toBe("process-failed");
-    // Names the command that could not start, not the wrapper that reported it.
     expect((thrown as Error).message).toContain("skillval-definitely-not-a-real-binary-xyz");
+  });
+
+  it("does not treat the agent's own output as a wrapper control message", () => {
+    // Control data used to travel as a marker string on stderr, which any command could print.
+    // A trial that happened to emit it was reclassified as infrastructure and dropped from the
+    // vote - a gradeable result silently discarded.
+    const result = spawnAgent({
+      args: ["-c", ">&2 echo 'skillval-wrapper: failed to spawn something'; echo real-answer"],
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    expect(result.stdout).toContain("real-answer");
+    expect(result.status).toBe(0);
+  });
+
+  it("closes stdin so an agent that reads it does not hang, and keeps the streams apart", () => {
+    // pi -p blocks on an open non-TTY stdin until the 15-minute timeout kills it. This property
+    // was verified by hand when the wrapper was written and never pinned, so a stdio regression
+    // would have turned every pi trial into a quarter-hour hang with the suite still green.
+    const result = spawnAgent({
+      args: ["-c", "cat; echo to-stdout; >&2 echo to-stderr"],
+      closeStdin: true,
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+      timeoutMs: 5000,
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("to-stdout");
+    // Separate channels: a JSONL trace is parsed from stdout, so stderr leaking into it corrupts
+    // every trace rather than failing loudly.
+    expect(result.stdout).not.toContain("to-stderr");
+    expect(result.stderr).toContain("to-stderr");
+  });
+
+  it("reports the signal the agent died from rather than a flat exit 1", () => {
+    // The wrapper exits on the child's behalf, so a signalled agent was reported as "exited 1".
+    // throwNeverGraded and the pi diagnostics both print that, and a killed agent reading as an
+    // ordinary nonzero exit hides an OOM.
+    const result = spawnAgent({
+      args: ["-c", "kill -9 $$"],
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    expect(result.signal).toBe("SIGKILL");
   });
 
   it("kills the group when the agent is killed for exceeding its timeout", async () => {
@@ -177,7 +257,7 @@ describe("spawnAgent process-group containment", () => {
     let thrown: unknown;
     try {
       spawnAgent({
-        args: ["-c", `(sleep 3; touch ${marker}) & sleep 30`],
+        args: ["-c", `(sleep 3; touch ${marker}) >/dev/null 2>&1 </dev/null & sleep 30`],
         command: "sh",
         env: { PATH: process.env.PATH ?? "" },
         timeoutMs: 1000,
@@ -185,7 +265,6 @@ describe("spawnAgent process-group containment", () => {
     } catch (error) {
       thrown = error;
     }
-    // Still classified as infrastructure, not as the skill failing.
     expect(thrown).toBeInstanceOf(ExecutorInfraError);
     expect((thrown as ExecutorInfraError).kind).toBe("timeout");
 

@@ -85,7 +85,7 @@ import { sha256 } from "./utils.js";
 //     failures - a model's own empty directory vanished, and a symlink a fixture was told to create
 //     was erased - and grading under a different prefix broke generated files carrying absolute
 //     paths. Escaping links are dropped, internal ones kept, absolute internal ones repointed.
-export const RUNNER_VERSION = 34;
+export const RUNNER_VERSION = 35;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

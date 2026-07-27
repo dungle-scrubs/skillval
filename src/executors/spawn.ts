@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 // spawnSync buffers the child's entire stdout in memory. A runaway generation (observed: GLM-5.2
 // emitting multi-hundred-MB to multi-GB `--mode json` traces when a skill is seeded) overflows that
@@ -129,49 +129,93 @@ export interface SpawnAgentOptions {
 // stdio, and reaps the group on exit or on a signal. The wrapper is what spawnSync waits for, so
 // this whole path stays synchronous. The pid file is belt and braces for the paths the wrapper
 // cannot trap - SIGKILL from an ENOBUFS abort leaves it no chance to run its own cleanup.
-// Marker the wrapper prints when it cannot start the agent at all, so that failure keeps the typed
-// classification spawnSync's own ENOENT used to give it.
-const WRAPPER_SPAWN_FAILED = "skillval-wrapper: failed to spawn";
+// Control data travels through files in a private directory, never through the agent's stderr. A
+// marker matched against stderr is spoofable: any command that happens to print it would be
+// reclassified as infrastructure and dropped from the vote.
+//
+// The pid file is a CLEANUP-PENDING TOKEN, not a record to be read opportunistically. The wrapper
+// unlinks it once it has taken the group down, so its continued existence is the only thing that
+// means "nobody reaped this". That inverts an earlier protocol that guessed from spawnSync's
+// result: `result.error !== undefined` is wrong in both directions - a SIGKILLed wrapper reports
+// `signal` with NO error, so the group leaked, while a timeout reports an error even though the
+// wrapper already cleaned up, so the parent re-killed a pid that may since have been recycled.
+const PID_FILE = "pid";
+const SPAWN_ERROR_FILE = "spawn-error";
 
 const GROUP_WRAPPER = `
-const WRAPPER_SPAWN_FAILED = ${JSON.stringify("skillval-wrapper: failed to spawn")};
 const { spawn } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
+const { rmSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
 // slice(1), not slice(2): under node -e there is no script filename, so the first user
-// argument sits at argv[1]. slice(2) silently dropped the pid file and ran the agent with
-// its own command name as the first argument.
-const [pidFile, command, ...args] = process.argv.slice(1);
+// argument sits at argv[1]. slice(2) silently dropped the control directory and ran the agent
+// with its own command name as the first argument.
+const [control, command, ...args] = process.argv.slice(1);
+const pidFile = join(control, ${JSON.stringify("pid")});
 const child = spawn(command, args, { detached: true, stdio: ["inherit", "inherit", "inherit"] });
-if (child.pid !== undefined) writeFileSync(pidFile, String(child.pid));
-// Reaped from three places on purpose - the child's exit, a trapped signal here, and the pid
-// file back in skillval. They overlap: removing any ONE leaves every test green, because
-// another covers the same path. Removing two does not. Each owns a case the others miss - a
-// trapped SIGTERM with no spawnSync error (an interactive interrupt) never reaches the pid-file
-// backstop, and a SIGKILL never reaches these handlers.
-const reap = () => { try { process.kill(-child.pid, "SIGKILL"); } catch {} };
+
+// Installed BEFORE anything that can throw. Recording the pid used to come first, so an ENOSPC or
+// EMFILE there killed the wrapper through an uncaught exception while the agent was ALREADY
+// running and no handler existed to take it down - an orphan with nothing left pointing at it.
+let reaped = false;
+const reap = () => {
+  if (reaped) return;
+  reaped = true;
+  try { process.kill(-child.pid, "SIGKILL"); } catch {}
+  // Consumed, so the parent knows this group is handled. Order matters: kill first, unlink second,
+  // or a crash in between drops the token while the group still runs.
+  //
+  // Deliberately untested. What it prevents is the parent re-killing a pid the OS has since
+  // recycled, which cannot be reproduced on demand - removing this line leaves every test green
+  // because the group is already dead by then and the second kill is a harmless ESRCH. It stays
+  // because "the token is gone" is the only honest way to say "someone already handled this".
+  try { rmSync(pidFile, { force: true }); } catch {}
+};
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(signal, () => { reap(); process.exit(1); });
 }
+process.on("uncaughtException", () => { reap(); process.exit(1); });
 child.on("error", (error) => {
-  // Reported, not swallowed. Without this a missing or unexecutable CLI became a silent exit 1
-  // with empty stderr: spawnSync used to surface ENOENT directly, but it now spawns node, which
-  // always exists, so the real failure happens one level down where nobody could see it.
-  process.stderr.write(WRAPPER_SPAWN_FAILED + " " + command + ": " + error.message + "\\n");
+  reap();
+  try {
+    writeFileSync(join(control, ${JSON.stringify("spawn-error")}), command + ": " + error.message);
+  } catch {}
   process.exit(127);
 });
-child.on("exit", (code, signal) => { reap(); process.exit(signal !== null ? 1 : (code ?? 1)); });
+child.on("exit", (code, signal) => {
+  reap();
+  if (signal !== null) {
+    // Re-raised on ourselves so the caller sees the signal the AGENT died from rather than a flat
+    // exit 1 - otherwise a SIGKILLed agent is reported as "exited 1" in the ledger.
+    for (const installed of ["SIGTERM", "SIGINT", "SIGHUP"]) process.removeAllListeners(installed);
+    try { process.kill(process.pid, signal); } catch {}
+  }
+  process.exit(code ?? 1);
+});
+
+if (child.pid !== undefined) {
+  try { writeFileSync(pidFile, String(child.pid)); } catch { reap(); process.exit(1); }
+}
 `;
 
-// Kills the agent's process group by the pid the wrapper recorded. ESRCH - the group is already
-// empty - is the normal outcome and means the agent left nothing behind.
-function reapGroup(pidFile: string): void {
+// Kills the agent's process group if the wrapper did not. The token still being there is the
+// signal; when the wrapper cleaned up it unlinked it, so there is nothing here to act on and no
+// window in which a recycled pid could be killed by mistake.
+function reapAbandonedGroup(control: string): void {
+  const pidFile = join(control, PID_FILE);
   try {
     const pid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
     if (Number.isFinite(pid) && pid > 1) process.kill(-pid, "SIGKILL");
   } catch {
-    // No pid file (the wrapper never got that far) or the group is gone.
+    // Consumed by the wrapper, or never written: either way nothing is owed.
   }
-  rmSync(pidFile, { force: true });
+}
+
+function readControlFile(control: string, name: string): string | undefined {
+  try {
+    return readFileSync(join(control, name), "utf8").trim();
+  } catch {
+    return undefined;
+  }
 }
 
 // Runs an agent CLI once and captures its output, translating the two capture-layer failure modes
@@ -180,10 +224,10 @@ function reapGroup(pidFile: string): void {
 export function spawnAgent(options: SpawnAgentOptions): AgentProcessResult {
   const maxOutputBytes = options.maxOutputBytes ?? AGENT_MAX_OUTPUT_BYTES;
   const timeoutMs = options.timeoutMs ?? AGENT_TIMEOUT_MS;
-  const pidFile = join(mkdtempSync(join(tmpdir(), "skillval-group-")), "pid");
+  const control = mkdtempSync(join(tmpdir(), "skillval-group-"));
   const result = spawnSync(
     process.execPath,
-    ["-e", GROUP_WRAPPER, "--", pidFile, options.command, ...options.args],
+    ["-e", GROUP_WRAPPER, "--", control, options.command, ...options.args],
     {
       cwd: options.cwd,
       encoding: "utf8",
@@ -193,22 +237,16 @@ export function spawnAgent(options: SpawnAgentOptions): AgentProcessResult {
       timeout: timeoutMs,
     },
   );
-  // Only where the wrapper may not have run its own cleanup. On a normal exit it has already
-  // reaped, so firing again would aim kill(-pid) at a group that is gone - and if the OS recycled
-  // that pid in the meantime, at a stranger's process group instead. The wrapper traps SIGTERM,
-  // which is what both the timeout and the overflow abort send, so this is genuinely a backstop.
-  if (result.error !== undefined) reapGroup(pidFile);
-  rmSync(dirname(pidFile), { force: true, recursive: true });
+  reapAbandonedGroup(control);
+  const spawnFailure = readControlFile(control, SPAWN_ERROR_FILE);
+  rmSync(control, { force: true, recursive: true });
   const error = result.error as NodeJS.ErrnoException | undefined;
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
-  if (stderr.includes(WRAPPER_SPAWN_FAILED)) {
+  if (spawnFailure !== undefined) {
     // The agent never started, so nothing about the skill was tested. Same classification spawnSync
     // gave this before the wrapper existed, when it could report ENOENT itself.
-    throw new ExecutorInfraError(
-      stderr.slice(stderr.indexOf(WRAPPER_SPAWN_FAILED)).trim(),
-      "process-failed",
-    );
+    throw new ExecutorInfraError(`failed to start ${spawnFailure}`, "process-failed");
   }
   if (error?.code === "ETIMEDOUT") {
     throw new ExecutorInfraError(
