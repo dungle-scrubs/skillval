@@ -47,7 +47,13 @@ import { sha256 } from "./utils.js";
 // 25: pi's agent_end alone no longer counts as a completed turn. Verified against a live pi trace:
 //     assistant messages carry stopReason and agent_end carries willRetry, so an aborted, errored
 //     or to-be-retried turn was being graded as a content result.
-export const RUNNER_VERSION = 25;
+// 26: second-review fixes that change what a trial sees. pi now classifies an incomplete turn as
+//     infrastructure regardless of exit status (its JSON mode exits 0 on an errored turn, so the
+//     v25 stopReason check was never reached); staging applies its skip filter at every depth
+//     rather than only the top level; and a symlink inside a skill is rejected instead of staged,
+//     because walkFiles counts neither a link nor its target and external content could change
+//     what the model reads without changing the cache key.
+export const RUNNER_VERSION = 26;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

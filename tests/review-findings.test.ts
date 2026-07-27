@@ -4,7 +4,15 @@
  * Each test here first FAILED against the code as merged, which is what proved the finding was
  * real rather than a static-analysis guess. They stay as regression pins.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -80,16 +88,40 @@ describe("finding 2: staging and cache identity must agree on what a skill conta
     expect(existsSync(join(staged, ".git"))).toBe(false);
   });
 
-  it("stages a symlinked child as real content, which the hash also counts", () => {
+  it("skips a skipped directory at EVERY depth, not only the top level", () => {
+    // The first version of this test checked top-level entries only, so it passed against a
+    // stageSkill that filtered the top level and then handed references/ to a recursive cpSync -
+    // which copied references/node_modules wholesale while the hash ignored it at every depth.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    mkdirSync(join(source, "references", "node_modules"), { recursive: true });
+    writeFileSync(join(source, "references", "node_modules", "big.js"), "x");
+    writeFileSync(join(source, "references", "detail.md"), "# detail\n");
+
+    const workspace = makeDir();
+    seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    const staged = join(workspace, ".claude/skills/s");
+    expect(existsSync(join(staged, "references", "detail.md"))).toBe(true);
+    expect(existsSync(join(staged, "references", "node_modules"))).toBe(false);
+  });
+
+  it("rejects a symlink rather than staging content the hash cannot cover", () => {
+    // The first version asserted existsSync, which follows the link and so passed against a
+    // stageSkill that copied it AS a symlink - exposing mutable external content that
+    // skillContentHash never counts, which is a stale verdict with no symptom.
     const source = makeDir();
     const external = makeDir();
     writeFileSync(join(source, "SKILL.md"), "# s\n");
     writeFileSync(join(external, "shared.md"), "# shared\n");
     symlinkSync(join(external, "shared.md"), join(source, "shared.md"));
 
-    const workspace = makeDir();
-    seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
-    expect(existsSync(join(workspace, ".claude/skills/s", "shared.md"))).toBe(true);
+    let thrown: unknown;
+    try {
+      seedClaudeSkills(makeDir(), [{ directory: source, name: "s" }]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
   });
 });
 
@@ -181,5 +213,24 @@ describe("finding 4b: pi's agent_end is not by itself a completed turn", () => {
     // Deny-list, not allow-list: a reason this code has never seen must behave as it always did.
     expect(parsePiTrace(trace({ stopReason: "length" }), "s").completed).toBe(true);
     expect(parsePiTrace(trace({}), "s").completed).toBe(true);
+  });
+});
+
+describe("second review, finding 2: pi must not grade a zero-exit errored turn", () => {
+  it("keeps the caller's completion check independent of the exit status", () => {
+    // The parser-only tests above could not catch this: parsePiTrace correctly returned
+    // completed:false, but PiExecutor.runTrial only called throwNeverGraded inside its
+    // nonzero-exit branch. pi sets a failing exit code in text mode only, so a JSON-mode turn with
+    // stopReason "error" exits 0 - precisely the case the stopReason check exists for - and it was
+    // graded as content and cached. Pinned as source structure because constructing a full
+    // TrialRequest would spawn the real pi binary.
+    const source = readFileSync(new URL("../src/executors/pi.ts", import.meta.url), "utf8");
+    const guard = source.indexOf("if (!trace.completed) {");
+    const exitBranch = source.indexOf("if (result.status !== 0 || result.signal !== null) {");
+    expect(guard).toBeGreaterThan(-1);
+    // The completion guard must sit AFTER the exit-status branch closes, not inside it.
+    expect(guard).toBeGreaterThan(exitBranch);
+    const branchBody = source.slice(exitBranch, guard);
+    expect(branchBody).not.toContain("throwNeverGraded");
   });
 });

@@ -8,7 +8,7 @@
  * exactly one direction. Every arm now gets a staged directory that mirrors the skill's real
  * contents by copy, minus the eval definition.
  */
-import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isRecord, SKIPPED_DIRECTORIES } from "../utils.js";
@@ -80,6 +80,39 @@ export function withoutInvocationOptOut(source: string): { changed: boolean; tex
  * SKILL.md is written rather than copied so the staged text can drop the automatic-invocation
  * opt-out without touching the user's file.
  */
+/**
+ * Copies a directory tree, applying the same exclusions and the same symlink rule as
+ * `skillContentHash`, so what the model can read and what the cache key covers are identical.
+ *
+ * Symlinks are rejected rather than followed. `walkFiles` counts neither a symlink nor its target,
+ * while `cpSync` preserves symlinks by default, so a link into a mutable location outside the skill
+ * would change what the model reads without changing its content hash - a stale cached verdict with
+ * no symptom. Fixtures already reject symlinks; skills now match. No skill in the reference corpus
+ * uses one.
+ */
+function symlinkRejected(path: string): Error {
+  return new Error(
+    `${path} is a symlink; a skill must contain only regular files and directories, or its ` +
+      "content hash cannot cover what the model reads",
+  );
+}
+
+function copyTree(source: string, destination: string): void {
+  const entries = readdirSync(source, { withFileTypes: true });
+  mkdirSync(destination, { recursive: true });
+  for (const entry of entries) {
+    if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+    const from = join(source, entry.name);
+    const to = join(destination, entry.name);
+    if (entry.isSymbolicLink()) throw symlinkRejected(from);
+    if (entry.isDirectory()) {
+      copyTree(from, to);
+      continue;
+    }
+    if (entry.isFile()) copyFileSync(from, to);
+  }
+}
+
 export function stageSkill(parent: string, name: string, skillDirectory: string): string {
   try {
     return stage(parent, name, skillDirectory);
@@ -99,21 +132,25 @@ export function stageSkill(parent: string, name: string, skillDirectory: string)
 function stage(parent: string, name: string, skillDirectory: string): string {
   const target = join(parent, name);
   mkdirSync(target, { recursive: true });
-  for (const entry of readdirSync(skillDirectory)) {
-    if (entry === EVAL_DEFINITION_FILE) continue;
+  for (const entry of readdirSync(skillDirectory, { withFileTypes: true })) {
+    if (entry.name === EVAL_DEFINITION_FILE) continue;
     // Exactly what skillContentHash ignores. Staging content the cache key cannot see is a
     // stale-verdict bug: a .git or node_modules under a skill would change what the model reads
     // without changing its identity, and an unbounded node_modules also makes every trial a large
     // recursive copy.
-    if (SKIPPED_DIRECTORIES.has(entry)) continue;
-    const source = join(skillDirectory, entry);
-    const destination = join(target, entry);
-    if (entry === SKILL_FILE) {
+    if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+    const source = join(skillDirectory, entry.name);
+    const destination = join(target, entry.name);
+    if (entry.isSymbolicLink()) throw symlinkRejected(source);
+    if (entry.name === SKILL_FILE) {
       writeFileSync(destination, withoutInvocationOptOut(readFileSync(source, "utf8")).text);
       continue;
     }
-    // Recursive so a references/ tree the skill loads on demand is staged whole.
-    cpSync(source, destination, { recursive: true });
+    // Directories are walked entry by entry rather than handed to a recursive cpSync, so the skip
+    // filter applies at EVERY depth: cpSync would copy references/node_modules, which walkFiles -
+    // and so skillContentHash - excludes at every depth.
+    if (entry.isDirectory()) copyTree(source, destination);
+    else if (entry.isFile()) copyFileSync(source, destination);
   }
   return target;
 }
