@@ -18,6 +18,16 @@ export const EVAL_DEFINITION_FILE = "skillval.yml";
 
 const SKILL_FILE = "SKILL.md";
 
+// Where each executor stages seeded skills, relative to the trial workspace. Listed in one place
+// because the grader must exclude exactly what seeding created: a staged skill is copied into the
+// workspace, so generation mode would otherwise grade skillval's own input as model output. Kept
+// honest by a test that seeds through each executor and asserts the path falls under one of these.
+export const SKILL_STAGING_ROOTS: readonly string[] = [
+  ".agents/skills",
+  ".claude/skills",
+  ".skillval-skills",
+];
+
 // Frontmatter key that hides a skill from automatic invocation. Matched on its own line inside the
 // leading `---` block.
 const DISABLE_MODEL_INVOCATION = /^disable-model-invocation:[ \t]*true[ \t]*\r?\n/m;

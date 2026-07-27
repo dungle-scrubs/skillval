@@ -16,6 +16,7 @@ import type {
 } from "./discovery.js";
 import { discoverProjects, discoverSkills, selectSkills } from "./discovery.js";
 import { createExecutor } from "./executors/index.js";
+import { SKILL_STAGING_ROOTS } from "./executors/seed.js";
 import { ExecutorInfraError } from "./executors/spawn.js";
 import type { Executor, ExecutorMetadata } from "./executors/types.js";
 import type { ResolvedFixture } from "./fixture.js";
@@ -1254,7 +1255,8 @@ function runInstructionTrial(context: InstructionArmContext, arm: RuntimeArm): T
       skillName: context.targetId,
       workspace,
     });
-    const checks = gradeTrial(context.evalCase, arm, trace, workspace);
+    // No skills are seeded on an instruction arm, so nothing staged needs excluding.
+    const checks = gradeTrial(context.evalCase, arm, trace, workspace, []);
     return {
       checks,
       fixtureSetup,
@@ -1299,6 +1301,14 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
   return result;
 }
 
+// Absolute paths a seeded skill may occupy in the workspace. Every executor's staging root is
+// tried because the runner is executor-agnostic here; a path that does not exist costs nothing.
+function stagedSkillPaths(workspace: string, seeded: readonly SeededMember[]): string[] {
+  return seeded.flatMap((member) =>
+    SKILL_STAGING_ROOTS.map((root) => join(workspace, root, member.name)),
+  );
+}
+
 function runTrial(
   context: ArmContext,
   arm: RuntimeArm,
@@ -1321,7 +1331,15 @@ function runTrial(
       skillName: context.skill.name,
       workspace,
     });
-    const checks = gradeTrial(context.evalCase, arm, trace, workspace);
+    // Exclude what seeding staged: a staged skill is copied into the workspace, so generation mode
+    // would otherwise grade skillval's own input as if the model had written it.
+    const checks = gradeTrial(
+      context.evalCase,
+      arm,
+      trace,
+      workspace,
+      stagedSkillPaths(workspace, seeded),
+    );
     return {
       checks,
       fixtureSetup,

@@ -20,6 +20,7 @@ import {
   seedSkills as seedCodexSkills,
 } from "../src/executors/codex.js";
 import { piSkillArgs, seedInstruction as seedPiInstruction } from "../src/executors/pi.js";
+import { SKILL_STAGING_ROOTS } from "../src/executors/seed.js";
 
 const directories: string[] = [];
 const makeDir = (): string => {
@@ -150,5 +151,26 @@ describe("piSkillArgs", () => {
 
   it("hides all skills with --no-skills for the empty (baseline) arm", () => {
     expect(piSkillArgs([])).toEqual(["--no-skills"]);
+  });
+});
+
+describe("SKILL_STAGING_ROOTS covers every executor", () => {
+  it("lists a root that each executor actually stages into", () => {
+    // The grader excludes staged skills by building paths from this list. An executor that stages
+    // somewhere unlisted would leak its seeded skill back into the graded text as model output.
+    const workspace = makeDir();
+    const skill = makeDir();
+    writeFileSync(join(skill, "SKILL.md"), "# s\n");
+
+    seedCodexSkills(workspace, [{ directory: skill, name: "s" }]);
+    seedClaudeSkills(workspace, [{ directory: skill, name: "s" }]);
+    const piStaging = join(workspace, ".skillval-skills");
+    mkdirSync(piStaging, { recursive: true });
+    piSkillArgs([{ directory: skill, name: "s" }], piStaging);
+
+    for (const root of [".agents/skills", ".claude/skills", ".skillval-skills"]) {
+      expect(SKILL_STAGING_ROOTS).toContain(root);
+      expect(existsSync(join(workspace, root, "s", "SKILL.md"))).toBe(true);
+    }
   });
 });

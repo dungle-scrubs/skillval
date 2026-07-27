@@ -26,7 +26,11 @@ import { sha256 } from "./utils.js";
 // 20: skills are staged by COPY, not symlink. codex does not discover a skill whose SKILL.md is a
 //     symlink, so every codex target-present arm was identical to its own baseline and no codex
 //     verdict on a seeded skill measured anything.
-export const RUNNER_VERSION = 20;
+// 21: staged skills are excluded from the graded text. Copy-staging (20) put the skill's own
+//     SKILL.md in the workspace, so generation mode graded skillval's input as model output - a
+//     must_not_match trap fired on the skill's prose, and a must_match could pass on text the
+//     model never wrote.
+export const RUNNER_VERSION = 21;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
