@@ -265,3 +265,52 @@ describe("second review, finding 1: teardown must spare fixture and model output
     expect(stagedRelativePaths(source)).not.toContain("notes-from-the-model.md");
   });
 });
+
+describe("second review, finding 3: frontmatter rewriting must not corrupt the skill", () => {
+  const strip = (frontmatter: string): { changed: boolean; text: string } =>
+    withoutInvocationOptOut(`---\n${frontmatter}\n---\n\n# Body\n`);
+
+  it("removes the key whatever its quoting, and actually removes it", () => {
+    // Asserting `changed` alone is not enough: YAML parses a quoted key as the same property, so a
+    // line-based delete could report changed:true while returning byte-identical text - the arm
+    // stays hidden and nothing says so.
+    for (const line of ['"disable-model-invocation": true', "'disable-model-invocation': true"]) {
+      const result = strip(`name: s\n${line}`);
+      expect(result.changed).toBe(true);
+      expect(result.text).not.toContain("disable-model-invocation");
+    }
+  });
+
+  it("keeps every other key byte-intact", () => {
+    const result = strip("name: s\ndisable-model-invocation: true\nallowed-tools: Read, Write");
+    expect(result.changed).toBe(true);
+    expect(result.text).toContain("name: s");
+    expect(result.text).toContain("allowed-tools: Read, Write");
+    expect(result.text).not.toContain("disable-model-invocation");
+  });
+
+  it("handles a leading BOM rather than failing to see the frontmatter", () => {
+    const source = `﻿---\nname: s\ndisable-model-invocation: true\n---\n\n# Body\n`;
+    expect(withoutInvocationOptOut(source).changed).toBe(true);
+  });
+
+  it("refuses to rewrite frontmatter it cannot transform safely", () => {
+    // An anchor referenced elsewhere cannot have its pair deleted without leaving a dangling
+    // alias. Running a trial on a corrupted skill is worse than not running it, so this raises
+    // rather than guessing - the arm becomes infrastructure, which is visible.
+    let thrown: unknown;
+    try {
+      strip("name: s\ndisable-model-invocation: &flag true\nother: *flag");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+  });
+
+  it("leaves malformed frontmatter exactly as authored", () => {
+    const source = "---\nname: [unclosed\n---\n\n# Body\n";
+    const result = withoutInvocationOptOut(source);
+    expect(result.changed).toBe(false);
+    expect(result.text).toBe(source);
+  });
+});

@@ -57,7 +57,11 @@ import { sha256 } from "./utils.js";
 //     inside the staged skill directory survives to be graded; and pi's completion check became an
 //     allow-list of gradeable stop reasons, so an unfamiliar or missing reason fails closed as
 //     infrastructure instead of being graded as content and cached.
-export const RUNNER_VERSION = 27;
+// 28: the invocation opt-out is removed through the YAML document rather than by deleting a
+//     physical line. A quoted key parsed as the property but survived the line delete, so staging
+//     reported a change while writing byte-identical text and the arm stayed hidden; a leading BOM
+//     hid the frontmatter entirely; and anchors now raise instead of risking a dangling alias.
+export const RUNNER_VERSION = 28;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

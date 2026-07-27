@@ -11,8 +11,8 @@
 import type { Dirent } from "node:fs";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { isRecord, SKIPPED_DIRECTORIES } from "../utils.js";
+import { parseDocument } from "yaml";
+import { SKIPPED_DIRECTORIES } from "../utils.js";
 import { ExecutorInfraError } from "./spawn.js";
 
 // The eval definition is the test, not the skill. It is excluded from what a trial can see, and
@@ -28,7 +28,6 @@ const SKILL_FILE = "SKILL.md";
 // the BODY inside a fenced example, where rewriting it would change what the skill teaches.
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n/;
 const OPT_OUT_KEY = "disable-model-invocation";
-const OPT_OUT_LINE = /^disable-model-invocation[ \t]*:.*(\r?\n|$)/m;
 
 /**
  * Whether a SKILL.md opts out of automatic invocation, and the text with that opt-out removed.
@@ -50,21 +49,46 @@ const OPT_OUT_LINE = /^disable-model-invocation[ \t]*:.*(\r?\n|$)/m;
  * cannot happen. Those cases are tautologies and belong in neither corpus.
  */
 export function withoutInvocationOptOut(source: string): { changed: boolean; text: string } {
-  const block = FRONTMATTER.exec(source);
+  // A byte-order mark before `---` would hide the frontmatter entirely, leaving the opt-out in
+  // place and the arm silently unfalsifiable.
+  const bom = source.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const body = bom === "" ? source : source.slice(1);
+  const block = FRONTMATTER.exec(body);
   if (block === null) return { changed: false, text: source };
-  const [matched, body = ""] = block;
-  let parsed: unknown;
+  const [matched, yaml = ""] = block;
+
+  let document: ReturnType<typeof parseDocument>;
   try {
-    parsed = parseYaml(body);
+    document = parseDocument(yaml, { keepSourceTokens: true });
   } catch {
-    // Malformed frontmatter is left exactly as authored: rewriting something skillval cannot parse
-    // is how a staging step corrupts a skill.
     return { changed: false, text: source };
   }
-  if (!isRecord(parsed) || parsed[OPT_OUT_KEY] !== true) return { changed: false, text: source };
-  const stripped = body.replace(OPT_OUT_LINE, "");
-  const rebuilt = matched.replace(body, stripped);
-  return { changed: true, text: source.replace(matched, rebuilt) };
+  // Malformed frontmatter is left exactly as authored: rewriting something skillval cannot parse
+  // is how a staging step corrupts a skill.
+  if (document.errors.length > 0) return { changed: false, text: source };
+  if (!document.has(OPT_OUT_KEY) || document.get(OPT_OUT_KEY) !== true) {
+    return { changed: false, text: source };
+  }
+  // An anchor here may be referenced elsewhere in the document, and deleting its pair would leave a
+  // dangling alias - a skill that no longer parses. Running a trial against a corrupted skill is
+  // worse than not running it, so this raises and the arm becomes visible infrastructure.
+  if (/(^|\s)[&*][A-Za-z0-9_-]+/.test(yaml)) {
+    throw new Error(
+      `frontmatter uses a YAML anchor or alias, so ${OPT_OUT_KEY} cannot be removed without ` +
+        "risking a dangling reference; rewrite the skill's frontmatter without anchors",
+    );
+  }
+
+  document.delete(OPT_OUT_KEY);
+  const rewritten = String(document).trimEnd();
+  // Reparse what will actually be staged, so a transform that produced invalid YAML never reaches
+  // the model.
+  const verify = parseDocument(rewritten);
+  if (verify.errors.length > 0 || verify.has(OPT_OUT_KEY)) {
+    throw new Error(`removing ${OPT_OUT_KEY} produced frontmatter that no longer parses`);
+  }
+  const rebuilt = matched.replace(yaml, rewritten);
+  return { changed: true, text: bom + body.replace(matched, rebuilt) };
 }
 
 /**
