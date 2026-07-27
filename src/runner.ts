@@ -1,16 +1,21 @@
 /** Orchestrates discovery, trial arms, voting, caching, cleanup, and report persistence. */
 import {
-  copyFileSync,
+  cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { AblationVariants } from "./ablate.js";
 import { AblationError, ablateRule } from "./ablate.js";
 import type { ArmCacheIdentity } from "./cache.js";
@@ -36,7 +41,7 @@ import type { InstructionFileContent } from "./instruction.js";
 import { armInstructionContent, INSTRUCTION_ARMS, resolveRuleFile } from "./instruction.js";
 import { resolveLoadout } from "./loadout.js";
 import type { ArmResult, CaseResult, Check, EvalCase, RuntimeArm, TrialResult } from "./types.js";
-import { loadoutHash, sha256, skillContentHash } from "./utils.js";
+import { loadoutHash, pathContains, sha256, skillContentHash } from "./utils.js";
 import type { ArmState, Verdict } from "./verdict.js";
 import { armState, groupVerdict, INSTRUCTION_VERDICT_TEXT, VERDICT_TEXT } from "./verdict.js";
 import { clampedTrialCount, hasMajority, shouldEscalate } from "./vote.js";
@@ -1275,8 +1280,10 @@ function runInstructionTrial(context: InstructionArmContext, arm: RuntimeArm): T
   } catch (error) {
     return trialErrorResult(error);
   } finally {
-    rmSync(workspace, { force: true, recursive: true });
-    rmSync(trialHome, { force: true, recursive: true });
+    // Best-effort, exactly as for skill trials: cleanup failure must not replace a completed result
+    // or abort the run.
+    discard(workspace);
+    discard(trialHome);
   }
 }
 
@@ -1311,51 +1318,101 @@ function runArm(context: ArmContext, arm: RuntimeArm): ArmResult {
 }
 
 /**
- * Builds a throwaway copy of the trial workspace for grading, omitting the skill files staging put
- * there and following no symlinks.
+ * Prepares the tree the graders see: a faithful copy of the trial workspace with the skill files
+ * staging put there removed.
  *
- * Replaces deleting staged files out of the live workspace, which could not be made safe. Deletion
- * had to identify what to remove by PATHNAME in a tree the model can rewrite: replacing a staged
- * directory with a symlink to somewhere else made a leaf-level lstat check useless, because the
- * intermediate component was already followed by the time the leaf was examined. Every guard added
- * there protected one component of a path an adversary controlled.
+ * The ordering is the whole point. Deleting staged files out of the LIVE workspace could not be
+ * made safe - it had to identify them by pathname in a tree the model can rewrite, so a symlink
+ * swapped in for a staged directory defeated any leaf-level check. Deleting them from a copy the
+ * harness alone holds is safe, because nothing can race a tree nobody else has.
  *
- * Copying inverts the risk. Nothing in the model's tree is ever removed, so the worst case is a
- * file that should have been hidden being graded, not a file outside the workspace being deleted.
- * A staged file is skipped only when its bytes still hash to what staging wrote; the moment the
- * model edits one it becomes output and is copied. Symlinks are never followed and never
- * reproduced, so no grader can reach outside the snapshot.
+ * So the copy is FAITHFUL first: symlinks are preserved as symlinks rather than followed or
+ * dropped, empty directories survive, and modes come with it. An earlier version built the copy
+ * selectively and was lossy in exactly the ways that manufacture false failures - a model's own
+ * `mkdir -p dist/cache` vanished, and a fixture-created link that `test -L` was meant to observe
+ * disappeared, while fixture.ts actively tells authors to create such links.
+ *
+ * Grading then happens at the ORIGINAL pathname: the live tree is moved aside and the prepared copy
+ * takes its place. Generated files routinely embed absolute paths, and grading under a different
+ * prefix would both break those and leave the untouched original reachable.
  */
-export function gradingSnapshot(workspace: string, staged: readonly StagedSkill[]): string {
-  const snapshot = mkdtempSync(join(tmpdir(), "skillval-grade-"));
-  const unchanged = new Map<string, string>();
-  for (const skill of staged) {
-    for (const file of skill.created) unchanged.set(file.path, file.hash);
-  }
-
-  const copy = (from: string, to: string): void => {
-    for (const entry of readdirSync(from, { withFileTypes: true })) {
-      const source = join(from, entry.name);
-      const destination = join(to, entry.name);
-      // Never followed and never recreated: a symlink in the graded tree could otherwise let a
-      // command_exit grader read or write outside the snapshot.
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) {
-        mkdirSync(destination, { recursive: true });
-        copy(source, destination);
-        // A directory that held nothing but staged input is harness residue. Pruning it HERE is
-        // safe in a way pruning the model's own tree never was - this copy is ours.
-        if (readdirSync(destination).length === 0) rmSync(destination, { recursive: true });
+/**
+ * Removes symlinks whose target lies outside the graded tree, keeping the ones inside it.
+ *
+ * Both halves matter. Dropping every symlink was lossy: fixture.ts tells authors to create links in
+ * setup, so a `test -L current` case could never pass. Keeping every symlink would hand a
+ * command_exit grader - which runs arbitrary shell - a path out of the tree, including back into
+ * the model's own live workspace.
+ */
+function dropEscapingLinks(directory: string, root: string, workspace: string): void {
+  // Compared against REAL paths. On macOS /tmp is itself a symlink to /private/tmp, so an absolute
+  // link written by the model resolves to the /private form while the workspace path does not -
+  // and a naive comparison classifies the model's own output as an escape and deletes it.
+  const realRoot = realpathSync(root);
+  const realWorkspace = existsSync(workspace) ? realpathSync(workspace) : workspace;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      const target = resolve(directory, readlinkSync(path));
+      if (target === realRoot || pathContains(realRoot, target)) continue;
+      // An ABSOLUTE link the model wrote inside the workspace points at the live tree, which the
+      // copy is not. Repointing it at the equivalent path here keeps the link meaningful instead of
+      // deleting output that was never trying to escape.
+      if (pathContains(realWorkspace, target)) {
+        rmSync(path, { force: true });
+        symlinkSync(join(root, relative(realWorkspace, target)), path);
         continue;
       }
-      if (!entry.isFile()) continue;
-      const expected = unchanged.get(source);
-      if (expected !== undefined && sha256(readFileSync(source)) === expected) continue;
-      copyFileSync(source, destination);
+      rmSync(path, { force: true });
+      continue;
     }
-  };
-  copy(workspace, snapshot);
-  return snapshot;
+    if (entry.isDirectory()) dropEscapingLinks(path, root, workspace);
+  }
+}
+
+export function prepareGradingTree(workspace: string, staged: readonly StagedSkill[]): string {
+  const prepared = mkdtempSync(join(tmpdir(), "skillval-graded-"));
+  const root = join(prepared, "tree");
+  try {
+    // dereference:false keeps symlinks as symlinks; without it a link would be replaced by a copy
+    // of its target, which is both lossy and a way out of the workspace.
+    cpSync(workspace, root, { dereference: false, preserveTimestamps: true, recursive: true });
+    for (const skill of staged) {
+      for (const file of skill.created) {
+        const inCopy = join(root, relative(workspace, file.path));
+        // Only while the bytes still match what staging wrote. The moment the model edits a staged
+        // file it is output, and output is graded.
+        const stats = statSync(inCopy, { throwIfNoEntry: false });
+        if (stats === undefined || !stats.isFile()) continue;
+        if (sha256(readFileSync(inCopy)) !== file.hash) continue;
+        rmSync(inCopy, { force: true });
+      }
+      // Only directories staging itself created, and only while empty - never every empty
+      // directory, which would delete the model's own. Deepest first, by path depth rather than by
+      // insertion order: a parent examined before its child is emptied looks non-empty and
+      // survives, which is how the provider root outlived its own subdirectory.
+      const deepestFirst = [...skill.directories].sort(
+        (left, right) => right.split(sep).length - left.split(sep).length,
+      );
+      for (const directory of deepestFirst) {
+        const inCopy = join(root, relative(workspace, directory));
+        const stats = statSync(inCopy, { throwIfNoEntry: false });
+        if (stats?.isDirectory() !== true) continue;
+        if (readdirSync(inCopy).length > 0) continue;
+        rmSync(inCopy, { force: true, recursive: true });
+      }
+    }
+    dropEscapingLinks(root, root, workspace);
+  } catch (error) {
+    // Nothing about the skill has been graded when preparation fails, so it must not vote or be
+    // cached - and the half-built copy must not leak.
+    discard(prepared);
+    throw new ExecutorInfraError(
+      `preparing the graded workspace failed: ${error instanceof Error ? error.message : String(error)}`,
+      "staging-failed",
+    );
+  }
+  return prepared;
 }
 
 function runTrial(
@@ -1381,14 +1438,24 @@ function runTrial(
       workspace,
     });
     // Remove what seeding staged BEFORE grading. A staged skill is copied into the workspace, so
-    // Graded from a snapshot that omits unchanged staged input. Nothing in the model's own tree is
-    // touched - see gradingSnapshot for why deleting from it could not be made safe.
-    const graded = gradingSnapshot(workspace, staged);
+    // Graded from a faithful copy with staged input removed, standing at the workspace's own path -
+    // see prepareGradingTree.
+    const prepared = prepareGradingTree(workspace, staged);
+    const parked = `${workspace}.live`;
     let checks: Check[];
     try {
-      checks = gradeTrial(context.evalCase, arm, trace, graded, []);
+      renameSync(workspace, parked);
+      renameSync(join(prepared, "tree"), workspace);
+      checks = gradeTrial(context.evalCase, arm, trace, workspace, []);
     } finally {
-      discard(graded);
+      discard(workspace);
+      // Put the model's own tree back where the outer cleanup expects to find it.
+      try {
+        renameSync(parked, workspace);
+      } catch {
+        // Already gone, or never moved because preparation failed first.
+      }
+      discard(prepared);
     }
     return {
       checks,
