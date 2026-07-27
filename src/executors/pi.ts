@@ -207,6 +207,21 @@ export function detectPi(settingsDirectory = join(homedir(), ".pi")): ExecutorMe
   };
 }
 
+// stopReason values that mean the turn did not finish. Deliberately an explicit deny-list, not an
+// allow-list of successes: pi may add reasons this code has never seen, and an unknown reason must
+// keep its current (gradeable) treatment rather than silently becoming an infrastructure failure.
+const FAILED_STOP_REASONS = new Set(["aborted", "cancelled", "canceled", "error", "refusal"]);
+
+// Whether the LAST assistant message in a transcript ended in an explicit failure.
+function endedInFailure(messages: readonly unknown[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (!isRecord(message) || message.role !== "assistant") continue;
+    return typeof message.stopReason === "string" && FAILED_STOP_REASONS.has(message.stopReason);
+  }
+  return false;
+}
+
 export function parsePiTrace(stdout: string, skillName: string): Trace {
   let completed = false;
   let invoked = false;
@@ -225,7 +240,12 @@ export function parsePiTrace(stdout: string, skillName: string): Trace {
     if (!isRecord(event)) continue;
     // agent_end carries the complete transcript, so it is the single authoritative source.
     if (event.type !== "agent_end" || !Array.isArray(event.messages)) continue;
-    completed = true;
+    // ...but reaching agent_end is not the same as finishing the turn. Verified against a live pi
+    // trace: assistant messages carry `stopReason` ("stop" on success) and agent_end carries
+    // `willRetry`. An aborted or errored turn produced no gradeable answer, so treating every
+    // agent_end as success recorded infrastructure as a content result. Only explicit failure
+    // markers flip this, so an unfamiliar stopReason still grades exactly as before.
+    completed = event.willRetry !== true && !endedInFailure(event.messages);
     // A read that errored (missing file, denied) never put the skill into context, so a toolCall
     // only counts when its correlated toolResult did not fail. Collected first: the result message
     // always follows its call in the transcript, but one pass over ids keeps the check order-free.

@@ -13,7 +13,7 @@ import {
   seedSkills as seedClaudeSkills,
 } from "../src/executors/claude.js";
 import { SKILLS_ROOT as codexSkillsRoot } from "../src/executors/codex.js";
-import { SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
+import { parsePiTrace, SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
 import { stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
 import { ExecutorInfraError } from "../src/executors/spawn.js";
 import { pathContains, skillContentHash } from "../src/utils.js";
@@ -149,5 +149,37 @@ describe("finding 6: only the executor's own staging root may be touched", () =>
     expect(codexSkillsRoot).toBe(".agents/skills");
     expect(piSkillsRoot).toBe(".skillval-skills");
     expect(new Set([claudeSkillsRoot, codexSkillsRoot, piSkillsRoot]).size).toBe(3);
+  });
+});
+
+describe("finding 4b: pi's agent_end is not by itself a completed turn", () => {
+  const trace = (assistant: Record<string, unknown>, extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      messages: [{ content: [{ text: "hi", type: "text" }], role: "assistant", ...assistant }],
+      type: "agent_end",
+      ...extra,
+    });
+
+  it("treats a successful stopReason as completed", () => {
+    // Verified against a live pi trace: assistant messages carry stopReason, "stop" on success.
+    expect(parsePiTrace(trace({ stopReason: "stop" }), "s").completed).toBe(true);
+  });
+
+  it("does not treat an aborted or errored turn as completed", () => {
+    for (const reason of ["aborted", "cancelled", "error", "refusal"]) {
+      expect(parsePiTrace(trace({ stopReason: reason }), "s").completed).toBe(false);
+    }
+  });
+
+  it("does not treat a turn pi intends to retry as completed", () => {
+    expect(parsePiTrace(trace({ stopReason: "stop" }, { willRetry: true }), "s").completed).toBe(
+      false,
+    );
+  });
+
+  it("keeps grading an unfamiliar stopReason, rather than inventing an infra failure", () => {
+    // Deny-list, not allow-list: a reason this code has never seen must behave as it always did.
+    expect(parsePiTrace(trace({ stopReason: "length" }), "s").completed).toBe(true);
+    expect(parsePiTrace(trace({}), "s").completed).toBe(true);
   });
 });

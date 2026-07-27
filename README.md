@@ -230,6 +230,20 @@ roots:
 executor: codex
 ```
 
+Pin the model and effort too, so a verdict is attributable to a named identity
+rather than to whatever your agent CLI happens to be configured for that day:
+
+```yaml
+executor: claude
+model: sonnet
+effort: low
+```
+
+Precedence is `--model` / `--effort` flag > config > the agent CLI's own default.
+Both fields are optional; unpinned, the executor's default applies and is
+recorded. Leaving them unset is how a study can silently split across two ledger
+columns when you switch models for unrelated reasons.
+
 Given `~/dev/agent-skills/typescript-style/SKILL.md`, add
 `~/dev/agent-skills/typescript-style/skillval.yml`:
 
@@ -614,7 +628,7 @@ counts, and a failed *simple* command (a lone `cat` of a missing path) does not 
 provably never loaded the skill. A compound command's aggregate exit status cannot attribute
 failure to the read itself (`cat SKILL.md && rg no-match` exits 1 with the skill already in
 context), so a compound command counts on completion regardless of exit code. Each arm seeds its own skills as workspace-local
-`.agents/skills/<name>` symlinks - the `solo` arm the evaluated skill, the `baseline` arm none.
+`.agents/skills/<name>` copies - the `solo` arm the evaluated skill, the `baseline` arm none.
 
 Every arm runs clean: `HOME` points to an empty temporary directory so `~/.agents/skills` is
 invisible, and `CODEX_HOME` points to a per-trial home that symlinks only `config.toml` and
@@ -637,9 +651,23 @@ directory holding the credentials file and a minimal `settings.json` rebuilt fro
 effort, and auth-routing keys - hooks, permissions, plugins, and user skills are omitted, so no
 user configuration acts on one arm differently (on macOS credentials live in the Keychain, so
 authentication survives; elsewhere the credentials file is copied across). Each arm seeds its own
-skills as workspace-local `.claude/skills/<name>` symlinks - the `solo` arm the target, the
+skills as workspace-local `.claude/skills/<name>` copies - the `solo` arm the target, the
 `baseline` arm none. The reported model and effort come from the real configuration's
 `settings.json` (`model`/`effortLevel`), or `default`.
+
+**User-invoked skills.** A skill whose frontmatter carries
+`disable-model-invocation: true` is withheld from the model entirely by Claude Code - it appears in
+no listing, no Skill tool call can name it, and its body never enters the context. A seeded arm
+would therefore be identical to its own baseline, and every case on such a skill would be
+unfalsifiable. Staging removes that key from the staged copy (never from your file), so the body
+can reach the model.
+
+That is an approximation, and its limits are worth stating. In production the user invokes the
+skill deliberately and the body loads unconditionally; in a trial the model still has to choose to
+invoke it. So a `should_trigger: true` case on such a skill is not testing what production does -
+it is establishing the precondition that the body reached the model at all. Read a `not-invoked`
+result there as "the precondition was not met", never as "the rule is dead": the ledger already
+treats `not-invoked` as silence rather than evidence, and `--prune-candidates` will not act on it.
 
 The pi adapter runs [pi](https://github.com/badlogic/pi-mono) headlessly:
 
