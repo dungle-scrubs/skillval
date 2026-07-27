@@ -44,7 +44,10 @@ import { sha256 } from "./utils.js";
 //     failure before the model runs is infrastructure rather than a FAIL voting against the skill;
 //     and staged-path exclusion/teardown now uses the ACTIVE executor's root instead of every
 //     known root, which could delete model output living under another executor's path.
-export const RUNNER_VERSION = 24;
+// 25: pi's agent_end alone no longer counts as a completed turn. Verified against a live pi trace:
+//     assistant messages carry stopReason and agent_end carries willRetry, so an aborted, errored
+//     or to-be-retried turn was being graded as a content result.
+export const RUNNER_VERSION = 25;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
