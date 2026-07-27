@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Trace, TrialOutcome } from "../types.js";
 import { isRecord, readsSkillMarkdown } from "../utils.js";
 import { type StagedSkill, stageSkill } from "./seed.js";
@@ -130,11 +130,23 @@ export function seedSkills(workspace: string, skills: readonly SeededSkill[]): S
   if (skills.length === 0) return [];
   const skillsRoot = join(workspace, SKILLS_ROOT);
   const staged: StagedSkill[] = [];
+  // Ancestors the harness creates outside stageSkill. Recorded so grading can prune them when they
+  // hold nothing else: otherwise the solo arm shows a provider directory the baseline never had,
+  // and a raw-workspace grader can see that harness-only difference.
+  const roots: string[] = [];
+  for (
+    let path = skillsRoot;
+    path.startsWith(workspace) && path !== workspace;
+    path = dirname(path)
+  ) {
+    if (!existsSync(path)) roots.push(path);
+  }
   mkdirSync(skillsRoot, { recursive: true });
   for (const skill of skills) {
     // Staged, not symlinked wholesale: the skill's own eval definition must never be visible to
     // the arm being graded (see stageSkill).
-    staged.push(stageSkill(skillsRoot, skill.name, skill.directory));
+    const one = stageSkill(skillsRoot, skill.name, skill.directory);
+    staged.push({ ...one, directories: [...roots, ...one.directories] });
   }
   return staged;
 }

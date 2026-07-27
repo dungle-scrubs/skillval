@@ -6,6 +6,7 @@
  */
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -25,7 +26,7 @@ import { SKILLS_ROOT as codexSkillsRoot } from "../src/executors/codex.js";
 import { parsePiTrace, SKILLS_ROOT as piSkillsRoot } from "../src/executors/pi.js";
 import { stagedRelativePaths, stageSkill, withoutInvocationOptOut } from "../src/executors/seed.js";
 import { ExecutorInfraError } from "../src/executors/spawn.js";
-import { gradingSnapshot } from "../src/runner.js";
+import { prepareGradingTree } from "../src/runner.js";
 import { pathContains, skillContentHash } from "../src/utils.js";
 
 const directories: string[] = [];
@@ -340,9 +341,10 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     rmSync(join(staged.target, "references"), { force: true, recursive: true });
     symlinkSync(join(outside, "references"), join(staged.target, "references"));
 
-    const snapshot = gradingSnapshot(workspace, [staged]);
+    const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
     expect(readFileSync(join(outside, "references", "detail.md"), "utf8")).toBe("precious\n");
-    // The symlink is not reproduced either, so no grader can traverse it.
+    // The ESCAPING link is dropped, so a command_exit grader cannot traverse out of the tree -
+    // while an internal link survives, which the next test pins.
     expect(existsSync(join(snapshot, ".claude/skills/s/references"))).toBe(false);
     rmSync(snapshot, { force: true, recursive: true });
   });
@@ -354,13 +356,13 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     const [first] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
     if (first === undefined) throw new Error("seeding produced no manifest");
 
-    const hidden = gradingSnapshot(workspace, [first]);
+    const hidden = join(prepareGradingTree(workspace, [first]), "tree");
     expect(existsSync(join(hidden, ".claude/skills/s/SKILL.md"))).toBe(false);
     rmSync(hidden, { force: true, recursive: true });
 
     // Once the model rewrites it, the bytes no longer match what staging wrote - that is output.
     writeFileSync(join(first.target, "SKILL.md"), "# rewritten by the model\n");
-    const kept = gradingSnapshot(workspace, [first]);
+    const kept = join(prepareGradingTree(workspace, [first]), "tree");
     expect(readFileSync(join(kept, ".claude/skills/s/SKILL.md"), "utf8")).toContain("rewritten");
     rmSync(kept, { force: true, recursive: true });
   });
@@ -373,8 +375,19 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     if (staged === undefined) throw new Error("seeding produced no manifest");
     writeFileSync(join(workspace, "produced.ts"), "export const x = 1;\n");
 
-    const snapshot = gradingSnapshot(workspace, [staged]);
+    // Output the model produced that the earlier, selective copy silently destroyed.
+    mkdirSync(join(workspace, "dist", "cache"), { recursive: true });
+    symlinkSync(join(workspace, "produced.ts"), join(workspace, "current.ts"));
+
+    const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
     expect(existsSync(join(snapshot, "produced.ts"))).toBe(true);
+    // An empty directory the MODEL created survives: `mkdir -p dist/cache` followed by
+    // `command_exit: test -d dist/cache` is a correct arm, and pruning every empty directory
+    // failed it.
+    expect(existsSync(join(snapshot, "dist", "cache"))).toBe(true);
+    // A symlink survives AS a symlink. fixture.ts tells authors to create links in setup, so
+    // erasing them made `test -L` cases impossible to pass.
+    expect(lstatSync(join(snapshot, "current.ts")).isSymbolicLink()).toBe(true);
     // The provider skills root held nothing but staged input, so it must not appear - otherwise a
     // raw-workspace grader sees a directory in the solo arm that the baseline never had.
     expect(existsSync(join(snapshot, ".claude"))).toBe(false);

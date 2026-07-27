@@ -80,7 +80,12 @@ import { sha256 } from "./utils.js";
 //     being re-serialized. String(document) normalized flow spacing, rewrote comment whitespace and
 //     could change the value of a trailing |+ block scalar - a staging step silently editing a
 //     skill it was only asked to read.
-export const RUNNER_VERSION = 32;
+// 33: the graded tree is a FAITHFUL copy with staged files removed, standing at the workspace's own
+//     path. The previous selective copy was lossy in exactly the ways that manufacture false
+//     failures - a model's own empty directory vanished, and a symlink a fixture was told to create
+//     was erased - and grading under a different prefix broke generated files carrying absolute
+//     paths. Escaping links are dropped, internal ones kept, absolute internal ones repointed.
+export const RUNNER_VERSION = 33;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;
