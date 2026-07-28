@@ -220,19 +220,43 @@ describe("spawnAgent process-group containment", () => {
     // was verified by hand when the wrapper was written and never pinned, so a stdio regression
     // would have turned every pi trial into a quarter-hour hang with the suite still green.
     const result = spawnAgent({
-      args: ["-c", "cat; echo to-stdout; >&2 echo to-stderr"],
+      args: [
+        "-c",
+        "if [ -c /dev/stdin ]; then echo fd0=character-device; else echo fd0=other; fi; cat; echo to-stdout; >&2 echo to-stderr",
+      ],
       closeStdin: true,
       command: "sh",
       env: { PATH: process.env.PATH ?? "" },
       timeoutMs: 5000,
     });
     expect(result.status).toBe(0);
+    // The KIND of fd 0, not just that EOF arrived. spawnSync supplies EOF on its own pipe whether
+    // or not this flag is set, so asserting "cat terminated" passed with the feature removed - the
+    // review confirmed the mutant survived. /dev/null is a character device; an inherited pipe or
+    // socket is not, so this distinguishes them.
+    expect(result.stdout).toContain("fd0=character-device");
     expect(result.stdout).toContain("to-stdout");
     // Separate channels: a JSONL trace is parsed from stdout, so stderr leaking into it corrupts
     // every trace rather than failing loudly.
     expect(result.stdout).not.toContain("to-stderr");
     expect(result.stderr).toContain("to-stderr");
   });
+
+  it.each(["SIGKILL", "SIGPIPE", "SIGUSR1"])(
+    "reports %s as the signal the agent died from rather than a flat exit 1",
+    (name) => {
+      // SIGKILL alone terminated the wrapper during its own re-raise, so the fd-3 fallback beneath
+      // it was never exercised: Node IGNORES SIGPIPE and OWNS SIGUSR1 for the inspector, so killing
+      // itself with those is a no-op and control falls through to the report. Removing that report
+      // left this test green while both became a flat status with no signal.
+      const result = spawnAgent({
+        args: ["-c", `kill -s ${name.replace("SIG", "")} $$`],
+        command: "sh",
+        env: { PATH: process.env.PATH ?? "" },
+      });
+      expect(result.signal).toBe(name);
+    },
+  );
 
   it("reports the signal the agent died from rather than a flat exit 1", () => {
     // The wrapper exits on the child's behalf, so a signalled agent was reported as "exited 1".

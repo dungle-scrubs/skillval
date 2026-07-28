@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { spawnAgent } from "../src/executors/spawn.js";
 
@@ -8,12 +7,17 @@ describe("the wrapper control channel is unreachable from the agent", () => {
     // control path passed there was fully readable, which let the agent forge the pid token and
     // point the harness's kill(-pid) at a process group it never owned.
     const result = spawnAgent({
-      args: ["-c", "ps -o args= -p $PPID > /tmp/skillval-probe-argv.txt; echo REAL_ANSWER"],
+      // Through stdout, not a fixed temp file. Redirecting to a file made the probe pass whenever
+      // `ps` FAILED - the redirect created an empty file, the shell still succeeded, and an empty
+      // file trivially satisfies "does not contain". The marker proves ps actually produced output.
+      args: ["-c", "echo ARGV-BEGIN; ps -o args= -p $PPID; echo ARGV-END"],
       command: "sh",
       env: { PATH: process.env.PATH ?? "" },
     });
-    expect(result.stdout).toContain("REAL_ANSWER");
-    expect(readFileSync("/tmp/skillval-probe-argv.txt", "utf8")).not.toContain("skillval-group-");
+    const argv = result.stdout.split("ARGV-BEGIN")[1]?.split("ARGV-END")[0] ?? "";
+    // ps really ran and really reported the wrapper: without this the assertion below is vacuous.
+    expect(argv).toContain("node");
+    expect(argv).not.toContain("skillval-group-");
   });
 
   it("is not in the agent's environment", () => {

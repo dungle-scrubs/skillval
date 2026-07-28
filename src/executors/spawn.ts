@@ -143,6 +143,23 @@ export interface SpawnAgentOptions {
 // spawns the agent with an explicit three-entry stdio array so fd 3 is never in the agent's table
 // (verified: the agent finds no /dev/fd/3). spawnSync hands the contents back in result.output[3].
 //
+// KNOWN LIMITS of a pid-plus-acknowledgement protocol, both inherent rather than oversights, and
+// both unreachable by a test:
+//
+//   - The group exists before its pid is reported. `spawn()` creates it and the report is the next
+//     statement, but a SIGKILL landing in that window leaves a running group the parent never
+//     learns about. Measured at roughly 2ms. Closing it needs the wrapper itself to be the group
+//     leader, which Node cannot arrange (no setpgid, and spawnSync ignores `detached`).
+//   - Killing the group and reporting "reaped" cannot be made atomic. A SIGKILL between them makes
+//     the parent repeat the kill against a pid that may since have been recycled; reversing the
+//     order trades that for a leak instead. Only a kernel-level handle would close both.
+//
+// A third limit is documented rather than defended: the wrapper sets `process.exitCode` and lets
+// the loop drain instead of calling `process.exit`, because Node documents the latter as able to
+// truncate pending pipe writes. Neither this review nor I could reproduce truncation - probes to
+// 64MB came back byte-exact - so the abrupt-exit mutant survives the suite. It is a documented
+// hazard on the exact path that carries every trace, and the correct form costs nothing.
+//
 // The protocol is newline-delimited and written with writeSync, so a SIGKILLed wrapper still leaves
 // whatever it had already reported:
 //   pid <n>              the agent's process group, reported immediately after spawn
@@ -212,16 +229,25 @@ child.on("error", (error) => {
 // closes the leaked writers' pipe ends, so the drain always terminates.
 child.on("exit", () => reap());
 child.on("close", (code, signal) => {
-  if (signal !== null) {
+  if (signal === null) {
+    // exitCode, NOT process.exit(). Child "close" only says the CHILD's streams closed; the
+    // wrapper's own forwarding writes to its stdout are asynchronous and may still be queued, and
+    // Node documents process.exit as able to truncate pending pipe writes. Setting the code and
+    // letting the loop drain is the documented way to flush. A JSONL trace missing its tail does
+    // not parse at all, so this is the difference between a graded trial and an infrastructure
+    // failure - and it would only ever show up under backpressure, on a big trace, in production.
+    process.exitCode = code ?? 1;
+    return;
+  }
+  {
     // Re-raised on ourselves so the caller sees the signal the AGENT died from rather than a flat
     // exit 1 - otherwise a SIGKILLed agent is reported as "exited 1" in the ledger.
     for (const installed of ["SIGTERM", "SIGINT", "SIGHUP"]) process.removeAllListeners(installed);
     try { process.kill(process.pid, signal); } catch {}
     // Reached only when the re-raise did NOT terminate us: Node ignores SIGPIPE and owns SIGUSR1.
     report("signal " + signal);
-    process.exit(128);
+    process.exitCode = 128;
   }
-  process.exit(code ?? 1);
 });
 
 if (child.pid !== undefined) report("pid " + String(child.pid));
