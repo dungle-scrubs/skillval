@@ -55,19 +55,35 @@ export function gradeTrial(
   // it. That is a false verdict in both directions: a must_not_match trap fires on the skill's own
   // prose (observed: a Tailwind case banning "tailwind.config" matched the skill's sentence saying
   // configuration does NOT live there), and a must_match can pass on text the model never produced.
-  const gradedText =
+  const produced =
     evalCase.mode === "generation"
       ? walkFiles(workspace)
           .filter((file) => !seededPaths.some((seeded) => pathContains(seeded, file)))
           .filter((file) => !INJECTED_FILES.has(relative(workspace, file)))
+      : [];
+  const gradedText =
+    evalCase.mode === "generation"
+      ? produced
           .map((file) => `=== ${relative(workspace, file)} ===\n${readFileSync(file, "utf8")}`)
           .join("\n")
       : trace.agentText;
 
+  // A generation case with no produced files reported `got: ` and nothing else, which cannot
+  // distinguish the three things it might mean: the model wrote nothing, it wrote somewhere the
+  // walk does not reach, or everything it wrote was excluded as staged input. That ambiguity
+  // stalled a real diagnosis - a case where both arms wrote nothing while the turn completed
+  // cleanly, and no way to see what the model said instead. The agent's own words are the evidence
+  // of which case it is, so they go in the detail when there is no file to show.
+  const emptyGeneration = evalCase.mode === "generation" && gradedText === "";
+  const excerpt = (text: string): string =>
+    emptyGeneration
+      ? `no files produced (workspace held ${walkFiles(workspace).length} file(s), all staged or injected); agent said: ${trace.agentText.slice(0, 400)}`
+      : text.slice(0, 400);
+
   for (const pattern of evalCase.assert?.must_match ?? []) {
     const pass = new RegExp(pattern, "m").test(gradedText);
     checks.push({
-      detail: pass ? pattern : `${pattern} | got: ${gradedText.slice(0, 400)}`,
+      detail: pass ? pattern : `${pattern} | got: ${excerpt(gradedText)}`,
       name: "must_match",
       pass,
     });
