@@ -273,3 +273,55 @@ describe("spawnAgent process-group containment", () => {
     rmSync(directory, { force: true, recursive: true });
   }, 20_000);
 });
+
+describe("spawnAgent containment when the leaked writer keeps stdout", () => {
+  it("returns promptly and contains a writer that inherited the agent's stdout", async () => {
+    // The variant the /dev/null redirect in the tests above was hiding. A writer that KEEPS stdout
+    // used to hold spawnSync's own pipe, so spawnSync could not return until that writer finished:
+    // in exactly the case where the wrapper failed to reap, the backstop ran after the mutation and
+    // the trial stalled until the writer exited. Piping the agent's output through the wrapper
+    // makes the wrapper the only pipe holder, so its death releases spawnSync immediately.
+    const directory = mkdtempSync(join(tmpdir(), "skillval-group-pipe-"));
+    const marker = join(directory, "written-by-a-pipe-holding-writer.txt");
+
+    const started = Date.now();
+    spawnAgent({
+      // No redirect, so the writer inherits stdout - AND the wrapper is killed, so nothing reaps
+      // on its way out. That combination is the one that used to stall: the writer held spawnSync's
+      // own pipe, so spawnSync could not return until it finished.
+      args: ["-c", `(sleep 4; touch ${marker}) & echo done; kill -9 $PPID`],
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    const elapsed = Date.now() - started;
+    // Returned while the writer was still sleeping - which a held pipe prevented, stalling the
+    // trial until the writer exited (measured at ~4.1s here, and up to the 15-minute timeout in
+    // general) and letting the mutation land before the backstop could run.
+    //
+    // Output is NOT asserted here. The agent killed its own supervisor uncatchably, so anything
+    // still in flight through the wrapper is lost - the accepted cost of piping, and only in a
+    // scenario that is an infrastructure failure regardless. Full capture on a normal run is
+    // pinned by the test below, which is the case that must never regress.
+    expect(elapsed).toBeLessThan(2000);
+
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    expect(existsSync(marker)).toBe(false);
+    rmSync(directory, { force: true, recursive: true });
+  }, 20_000);
+
+  it("forwards every byte the agent wrote, including a large trace", () => {
+    // Piping made this wrapper responsible for the agent's output rather than letting it write
+    // straight to skillval's pipe, so truncation became possible where it was not before. A JSONL
+    // trace missing its tail does not parse at all, which would fail every trial of every arm.
+    const lines = 20_000;
+    const result = spawnAgent({
+      args: ["-c", `seq 1 ${lines}; >&2 echo stderr-tail; echo LAST-LINE`],
+      command: "sh",
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("LAST-LINE");
+    expect(result.stdout.split("\n").filter((line) => line !== "").length).toBe(lines + 1);
+    expect(result.stderr).toContain("stderr-tail");
+  }, 20_000);
+});
