@@ -35,8 +35,22 @@ cases:
       # would need to exclude cannot be pinned to a regex that could actually
       # fire, and a check that cannot fire is exactly what this skill says not
       # to write.
-      must_match: ['payments', '[Cc]apabilit|decay|expire|no-?op']
-    trials: 1
+      # Second pattern widened 2026-07-28. A solo answer picked payments and
+      # reasoned exactly right - "if a newer model drifts on them, nobody's hurt
+      # and nothing breaks - low stakes either way" - and was scored a failure
+      # for not using the words capability or decay. Same shape as the four
+      # other asserts fixed this session: the reasoning transfers, the house
+      # vocabulary does not, and grading the vocabulary grades the wrong thing.
+      # 'payments' still carries the discriminator; this half only has to show
+      # the answer reasoned from CONSEQUENCE rather than from the count.
+      must_match:
+        - 'payments'
+        - '[Cc]apabilit|decay|expire|no-?op|drift|stakes|nobody.s hurt|nothing breaks|still (?:catch|matter)'
+    # Raised from 1 on 2026-07-28. Kept rather than retired: "rank by capability
+    # decay, not by ungraded-rule count" is this skill's whole thesis, not a
+    # house preference, and the case discriminates properly - a baseline that
+    # counts fractions picks the other skill. What it lacked was trials.
+    trials: 3
 
   # PRUNED 2026-07-25: refuse-to-script-judgment (rule
   # script-only-decidable-checks) and diagnose-false-fail (rule
