@@ -134,7 +134,7 @@ describe("spawnAgent process-group containment", () => {
     // waiting for those descriptors to close and the writer finished before the call even
     // returned. It failed without the wrapper, but not for the reason it claimed - it never
     // reproduced a mutation arriving after the turn was over.
-    const directory = mkdtempSync(join(tmpdir(), "skillval-group-test-"));
+    const directory = mkdtempSync(join(tmpdir(), "skillval-wtest-"));
     const marker = join(directory, "written-after-the-turn.txt");
 
     const started = Date.now();
@@ -158,7 +158,7 @@ describe("spawnAgent process-group containment", () => {
     // SIGKILL cannot be trapped, so the wrapper's own handlers never run. The parent used to skip
     // its backstop here because it keyed on `result.error`, which is UNDEFINED for a signalled
     // child - spawnSync reports `signal` instead. The group survived, and nothing noticed.
-    const directory = mkdtempSync(join(tmpdir(), "skillval-group-kill-"));
+    const directory = mkdtempSync(join(tmpdir(), "skillval-wtest-kill-"));
     const marker = join(directory, "written-after-the-wrapper-died.txt");
 
     const result = spawnAgent({
@@ -251,7 +251,7 @@ describe("spawnAgent process-group containment", () => {
     // the WRAPPER, which has to trap it and take the group down on its way out. A timed-out trial
     // is already infrastructure, but its leftover writer would still be running while the NEXT
     // trial's tree is graded.
-    const directory = mkdtempSync(join(tmpdir(), "skillval-group-timeout-"));
+    const directory = mkdtempSync(join(tmpdir(), "skillval-wtest-timeout-"));
     const marker = join(directory, "written-after-the-kill.txt");
 
     let thrown: unknown;
@@ -281,7 +281,7 @@ describe("spawnAgent containment when the leaked writer keeps stdout", () => {
     // in exactly the case where the wrapper failed to reap, the backstop ran after the mutation and
     // the trial stalled until the writer exited. Piping the agent's output through the wrapper
     // makes the wrapper the only pipe holder, so its death releases spawnSync immediately.
-    const directory = mkdtempSync(join(tmpdir(), "skillval-group-pipe-"));
+    const directory = mkdtempSync(join(tmpdir(), "skillval-wtest-pipe-"));
     const marker = join(directory, "written-by-a-pipe-holding-writer.txt");
 
     const started = Date.now();
