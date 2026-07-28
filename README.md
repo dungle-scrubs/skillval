@@ -747,6 +747,9 @@ The skill carries its own `skillval.yml`, so skillval can evaluate the skill it 
 
 ## Roadmap
 
+- Add an opt-in model-as-judge grader for the quality dimension a regex cannot reach (is a present
+  behavior *correct*, not just present). Deterministic stays the default; the judge runs only when a
+  case declares it. Design: [`design/model-as-judge.md`](design/model-as-judge.md).
 - Add a `skillval skill install` command that symlinks the bundled skill onto a discoverable path,
   replacing the manual step above.
 - Support multi-executor runs through the same normalized trace interface, now that `codex` and
