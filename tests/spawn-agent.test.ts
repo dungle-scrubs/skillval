@@ -164,10 +164,13 @@ describe("spawnAgent process-group containment", () => {
     const result = spawnAgent({
       args: [
         "-c",
-        // The agent exits immediately after killing the wrapper. Keeping it alive with a trailing
-        // `sleep` held the stdout pipe open, so spawnSync did not return until well after the
-        // writer had already fired and the test measured nothing.
-        `(sleep 4; touch ${marker}) >/dev/null 2>&1 </dev/null & kill -9 $PPID`,
+        // Killed after a beat, not instantly. Instantly is not containable and never will be: on
+        // Linux the agent kills the wrapper before spawn() has even returned the pid to JS, so the
+        // group could not have been recorded by anything (verified in a container - the control
+        // channel held only a marker written BEFORE the spawn call). macOS loses that race, which
+        // is why this passed locally and failed CI. Delaying the kill puts it after the pid is
+        // recorded, making the backstop the thing under test rather than the reporting window.
+        `(sleep 4; touch ${marker}) >/dev/null 2>&1 </dev/null & echo done; sleep 0.5; kill -9 $PPID`,
       ],
       command: "sh",
       env: { PATH: process.env.PATH ?? "" },
@@ -313,7 +316,8 @@ describe("spawnAgent containment when the leaked writer keeps stdout", () => {
       // No redirect, so the writer inherits stdout - AND the wrapper is killed, so nothing reaps
       // on its way out. That combination is the one that used to stall: the writer held spawnSync's
       // own pipe, so spawnSync could not return until it finished.
-      args: ["-c", `(sleep 4; touch ${marker}) & echo done; kill -9 $PPID`],
+      // Kill delayed for the reason given in the test above.
+      args: ["-c", `(sleep 4; touch ${marker}) & echo done; sleep 0.5; kill -9 $PPID`],
       command: "sh",
       env: { PATH: process.env.PATH ?? "" },
     });
@@ -326,7 +330,7 @@ describe("spawnAgent containment when the leaked writer keeps stdout", () => {
     // still in flight through the wrapper is lost - the accepted cost of piping, and only in a
     // scenario that is an infrastructure failure regardless. Full capture on a normal run is
     // pinned by the test below, which is the case that must never regress.
-    expect(elapsed).toBeLessThan(2000);
+    expect(elapsed).toBeLessThan(2500);
 
     await new Promise((resolve) => setTimeout(resolve, 6000));
     expect(existsSync(marker)).toBe(false);

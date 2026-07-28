@@ -10,12 +10,19 @@ describe("the wrapper control channel is unreachable from the agent", () => {
       // Through stdout, not a fixed temp file. Redirecting to a file made the probe pass whenever
       // `ps` FAILED - the redirect created an empty file, the shell still succeeded, and an empty
       // file trivially satisfies "does not contain". The marker proves ps actually produced output.
-      args: ["-c", "echo ARGV-BEGIN; ps -o args= -p $PPID; echo ARGV-END"],
+      // /proc first, ps second: the slim Linux images CI-adjacent work runs in have no procps, and
+      // macOS has no /proc. Trying only one made this pass wherever that one was missing, since an
+      // empty result trivially "does not contain" anything.
+      args: [
+        "-c",
+        "echo ARGV-BEGIN; if [ -r /proc/$PPID/cmdline ]; then tr '\\0' ' ' < /proc/$PPID/cmdline; else ps -o args= -p $PPID; fi; echo; echo ARGV-END",
+      ],
       command: "sh",
       env: { PATH: process.env.PATH ?? "" },
     });
     const argv = result.stdout.split("ARGV-BEGIN")[1]?.split("ARGV-END")[0] ?? "";
-    // ps really ran and really reported the wrapper: without this the assertion below is vacuous.
+    // The read really produced the wrapper's command line: without this the assertion below is
+    // vacuous, and it silently was on any host missing the one tool it tried.
     expect(argv).toContain("node");
     expect(argv).not.toContain("skillval-group-");
   });

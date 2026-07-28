@@ -146,10 +146,19 @@ export interface SpawnAgentOptions {
 // KNOWN LIMITS of a pid-plus-acknowledgement protocol, both inherent rather than oversights, and
 // both unreachable by a test:
 //
-//   - The group exists before its pid is reported. `spawn()` creates it and the report is the next
-//     statement, but a SIGKILL landing in that window leaves a running group the parent never
-//     learns about. Measured at roughly 2ms. Closing it needs the wrapper itself to be the group
-//     leader, which Node cannot arrange (no setpgid, and spawnSync ignores `detached`).
+//   - The group exists before its pid is reported, and the window cannot be closed. The report is
+//     the FIRST statement after `spawn()`, and it is still not early enough: on Linux an agent that
+//     kills its supervisor immediately wins the race before `spawn()` has even returned the pid to
+//     JS, so nothing could have been recorded (verified in a container - the channel held only a
+//     marker written BEFORE the spawn call). macOS loses that race, which is why this looked like a
+//     ~2ms curiosity locally and was a deterministic CI failure on Linux. Closing it needs the
+//     wrapper itself to be the group leader, which Node cannot arrange: no setpgid binding, and
+//     spawnSync ignores `detached`.
+//
+//     What this costs is bounded. It requires the agent to SIGKILL its own supervisor within
+//     microseconds of starting; the realistic case this whole wrapper exists for - an agent that
+//     backgrounds a writer and exits normally - is contained on both platforms, verified in a
+//     container (14ms, "pid N / reaped", the writer never landing its file).
 //   - Killing the group and reporting "reaped" cannot be made atomic. A SIGKILL between them makes
 //     the parent repeat the kill against a pid that may since have been recycled; reversing the
 //     order trades that for a leak instead. Only a kernel-level handle would close both.
@@ -196,6 +205,12 @@ const stdin = process.env.SKILLVAL_CLOSE_STDIN === "1" ? "ignore" : "inherit";
 // and stalled the trial meanwhile. Piping makes this wrapper the only holder, so its death
 // releases spawnSync at once. Three entries exactly, so fd 3 is NOT in the agent's table.
 const child = spawn(command, args, { detached: true, stdio: [stdin, "pipe", "pipe"] });
+// FIRST, before anything else. The group exists the moment spawn() returns and the agent runs
+// concurrently from that instant, so every statement between here and this report is a window in
+// which the agent can kill this wrapper and leave a group nobody knows the id of. On macOS that
+// window measured ~2ms and looked unreachable; on Linux the agent wins the race reliably, and CI
+// failed both containment tests because the report never happened at all.
+if (child.pid !== undefined) report("pid " + String(child.pid));
 child.stdout.pipe(process.stdout);
 child.stderr.pipe(process.stderr);
 
@@ -249,8 +264,6 @@ child.on("close", (code, signal) => {
     process.exitCode = 128;
   }
 });
-
-if (child.pid !== undefined) report("pid " + String(child.pid));
 `;
 
 function parseWrapperReport(raw: string): WrapperReport {
