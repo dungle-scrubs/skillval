@@ -36,8 +36,13 @@ export const PI_INVOCATION_DETECTION: ExecutorMetadata["invocationDetection"] = 
 // (verified against pi's resource loader), so the empty baseline sees no skills and the solo arm
 // sees only the target.
 // Stages one skill and records its manifest, so teardown deletes exactly what was written.
-function stagePi(root: string, skill: SeededSkill, staged?: StagedSkill[]): string {
-  const result = stageSkill(root, skill.name, skill.directory);
+function stagePi(
+  root: string,
+  skill: SeededSkill,
+  workspace: string,
+  staged?: StagedSkill[],
+): string {
+  const result = stageSkill(root, skill.name, skill.directory, workspace);
   staged?.push(result);
   return result.target;
 }
@@ -49,6 +54,7 @@ export function piSkillArgs(
   seededSkills: readonly SeededSkill[],
   stagingRoot?: string,
   staged?: StagedSkill[],
+  workspace?: string,
 ): string[] {
   const args = ["--no-skills"];
   for (const skill of seededSkills) {
@@ -56,7 +62,9 @@ export function piSkillArgs(
     // omits the eval definition - otherwise the graded arm can read its own answer key.
     args.push(
       "--skill",
-      stagingRoot === undefined ? skill.directory : stagePi(stagingRoot, skill, staged),
+      stagingRoot === undefined
+        ? skill.directory
+        : stagePi(stagingRoot, skill, workspace ?? stagingRoot, staged),
     );
   }
   return args;
@@ -125,7 +133,7 @@ export class PiExecutor implements Executor {
     const skillStaging = join(request.workspace, SKILLS_ROOT);
     mkdirSync(skillStaging, { recursive: true });
     const staged: StagedSkill[] = [];
-    const arm = piSkillArgs(request.seededSkills, skillStaging, staged);
+    const arm = piSkillArgs(request.seededSkills, skillStaging, staged, request.workspace);
     // pi expresses effort as a thinking level; the requested model and thinking pass through here.
     const selection: string[] = [];
     if (this.#overrides.model !== undefined) selection.push("--model", this.#overrides.model);

@@ -5,17 +5,21 @@
  * real rather than a static-analysis guess. They stay as regression pins.
  */
 import {
+  chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { discoverSkills } from "../src/discovery.js";
 import {
@@ -152,7 +156,8 @@ describe("finding 5: a staging failure is infrastructure, not a verdict", () => 
     // ordinary Error becomes a cached `run` FAIL that votes against the skill.
     let thrown: unknown;
     try {
-      stageSkill(makeDir(), "s", join(tmpdir(), "skillval-no-such-skill-dir-xyz"));
+      const ws = makeDir();
+      stageSkill(ws, "s", join(tmpdir(), "skillval-no-such-skill-dir-xyz"), ws);
     } catch (error) {
       thrown = error;
     }
@@ -167,7 +172,8 @@ describe("finding 5: a staging failure is infrastructure, not a verdict", () => 
 
     let thrown: unknown;
     try {
-      stageSkill(makeDir(), "s", source);
+      const workspace = makeDir();
+      stageSkill(workspace, "s", source, workspace);
     } catch (error) {
       thrown = error;
     }
@@ -337,12 +343,16 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     // the leaf-level guard.
     const outside = makeDir();
     mkdirSync(join(outside, "references"), { recursive: true });
-    writeFileSync(join(outside, "references", "detail.md"), "precious\n");
+    // Byte-IDENTICAL to what staging wrote. With different bytes the hash check alone declines the
+    // deletion, so the test passed against a leaf-only implementation and proved nothing. Matching
+    // bytes make the component-by-component walk the only thing standing between this file and
+    // rmSync.
+    writeFileSync(join(outside, "references", "detail.md"), "# detail\n");
     rmSync(join(staged.target, "references"), { force: true, recursive: true });
     symlinkSync(join(outside, "references"), join(staged.target, "references"));
 
     const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
-    expect(readFileSync(join(outside, "references", "detail.md"), "utf8")).toBe("precious\n");
+    expect(readFileSync(join(outside, "references", "detail.md"), "utf8")).toBe("# detail\n");
     // The ESCAPING link is dropped, so a command_exit grader cannot traverse out of the tree -
     // while an internal link survives, which the next test pins.
     expect(existsSync(join(snapshot, ".claude/skills/s/references"))).toBe(false);
@@ -388,10 +398,24 @@ describe("fourth review: grading runs against a snapshot, nothing is deleted", (
     // A symlink survives AS a symlink. fixture.ts tells authors to create links in setup, so
     // erasing them made `test -L` cases impossible to pass.
     expect(lstatSync(join(snapshot, "current.ts")).isSymbolicLink()).toBe(true);
-    // The provider skills root held nothing but staged input, so it must not appear - otherwise a
-    // raw-workspace grader sees a directory in the solo arm that the baseline never had.
+    // And it still RESOLVES once the tree occupies the pathname it is graded at. Checking only
+    // that a link survived passed against a version that repointed every link at the temporary
+    // build directory, which stops existing the moment the tree is installed - every link dangled
+    // exactly when graders ran, and no assertion here could see it.
+    // Asserted before the swap below moves the snapshot onto the workspace pathname.
     expect(existsSync(join(snapshot, ".claude"))).toBe(false);
-    rmSync(snapshot, { force: true, recursive: true });
+    const parked = `${workspace}.live`;
+    renameSync(workspace, parked);
+    renameSync(snapshot, workspace);
+    try {
+      expect(readFileSync(join(workspace, "current.ts"), "utf8")).toContain("export const x");
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+      renameSync(parked, workspace);
+    }
+    // The provider skills root held nothing but staged input, so it must not appear - otherwise a
+    // raw-workspace grader sees a directory in the solo arm that the baseline never had. Checked
+    // above, before the snapshot was renamed into place.
   });
 });
 
@@ -470,5 +494,117 @@ describe("fourth review: removing the opt-out preserves every other byte", () =>
     const text = strip("name: s\ndisable-model-invocation: true");
     expect(text).toContain("name: s");
     expect(text).not.toContain("disable-model-invocation");
+  });
+});
+
+describe("seventh review: the copy is faithful and the swap is contained", () => {
+  it("does not let a two-link pivot escape the graded tree", () => {
+    // `resolve()` collapses `..` LEXICALLY. With pivot -> "." the lexical answer cancels pivot
+    // against .. and calls the link internal; the kernel follows pivot first and lands in the
+    // PARENT, which is where the model's own tree is parked during grading. A command_exit grader
+    // runs arbitrary shell, so an escaping link there reads the live tree and the staged skill.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+    symlinkSync(".", join(workspace, "pivot"));
+    // The literal text, NOT join("pivot", "..") - join collapses it to "." at authoring time, so
+    // the first version of this test created an ordinary self-link and could not have failed.
+    symlinkSync("pivot/..", join(workspace, "escape"));
+
+    const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
+    expect(lstatSync(join(snapshot, "escape"), { throwIfNoEntry: false })).toBeUndefined();
+    // The honest internal link is untouched, so the drop is not just "delete every link".
+    expect(lstatSync(join(snapshot, "pivot"), { throwIfNoEntry: false })?.isSymbolicLink()).toBe(
+      true,
+    );
+    rmSync(snapshot, { force: true, recursive: true });
+  });
+
+  it("keeps an absolute internal link exactly as the model wrote it", () => {
+    // Rewriting through the canonical target silently edits model output: a link authored as
+    // $PWD/alias/file came back as $PWD/real/file, so a `readlink` grader comparing against what
+    // the model wrote failed on a link that resolved correctly.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+    mkdirSync(join(workspace, "real"), { recursive: true });
+    writeFileSync(join(workspace, "real", "file.ts"), "export const x = 1;\n");
+    symlinkSync(join(workspace, "real"), join(workspace, "alias"));
+    const authored = join(workspace, "alias", "file.ts");
+    symlinkSync(authored, join(workspace, "current.ts"));
+
+    const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
+    expect(readlinkSync(join(snapshot, "current.ts"))).toBe(authored);
+    rmSync(snapshot, { force: true, recursive: true });
+  });
+
+  it("preserves hard-link identity so an -ef assertion answers the same way", () => {
+    // cpSync splits one inode into two independent files. The dangerous direction is the inverted
+    // one: a baseline asserting `! test a -ef b` PASSES against the split copy, and a passing
+    // baseline is what marks a rule a no-op and deletes it.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+    writeFileSync(join(workspace, "a.ts"), "export const x = 1;\n");
+    linkSync(join(workspace, "a.ts"), join(workspace, "b.ts"));
+
+    const snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
+    const a = lstatSync(join(snapshot, "a.ts"));
+    const b = lstatSync(join(snapshot, "b.ts"));
+    expect(`${b.dev}:${b.ino}`).toBe(`${a.dev}:${a.ino}`);
+    rmSync(snapshot, { force: true, recursive: true });
+  });
+
+  it("refuses to stage through a symlinked provider root", () => {
+    // A fixture-planted `.claude -> elsewhere` sends staging through the link: files land under the
+    // link's target while the manifest records the pathname, so subtraction finds nothing to remove
+    // and the grader reads the skill's own SKILL.md as model output.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    const workspace = makeDir();
+    const elsewhere = makeDir();
+    symlinkSync(elsewhere, join(workspace, ".claude"));
+
+    let thrown: unknown;
+    try {
+      seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(ExecutorInfraError);
+    // And nothing was written through the link.
+    expect(existsSync(join(elsewhere, "skills", "s", "SKILL.md"))).toBe(false);
+  });
+
+  it("removes a staged file whose source directory was read-only", () => {
+    // Two reviews asked for EACCES handling on the premise that the copy preserves directory modes.
+    // Measured: it does not - cpSync brings a 0555 directory back as 0755, so the copy is always
+    // writable and the EACCES path cannot be reached through it. What this pins is the outcome that
+    // matters either way: a read-only source still gets its staged file subtracted.
+    const source = makeDir();
+    writeFileSync(join(source, "SKILL.md"), "# s\n");
+    const workspace = makeDir();
+    const [staged] = seedClaudeSkills(workspace, [{ directory: source, name: "s" }]);
+    if (staged === undefined) throw new Error("seeding produced no manifest");
+    // Model output beside the staged file, so the directory survives subtraction.
+    writeFileSync(join(staged.target, "notes.md"), "model wrote this\n");
+    chmodSync(staged.target, 0o555);
+
+    let snapshot: string;
+    try {
+      snapshot = join(prepareGradingTree(workspace, [staged]), "tree");
+    } finally {
+      chmodSync(staged.target, 0o755);
+    }
+    const inCopy = join(snapshot, relative(workspace, staged.target));
+    expect(existsSync(join(inCopy, "SKILL.md"))).toBe(false);
+    expect(readFileSync(join(inCopy, "notes.md"), "utf8")).toContain("model wrote this");
+    rmSync(snapshot, { force: true, recursive: true });
   });
 });

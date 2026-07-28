@@ -31,7 +31,7 @@ describe("stageSkill", () => {
     const parent = mkdtempSync(join(tmpdir(), "skillval-ws-"));
     dirs.push(parent);
 
-    const staged = stageSkill(parent, "x", source).target;
+    const staged = stageSkill(parent, "x", source, parent).target;
     const visible = readdirSync(staged);
 
     // The answer key must not be reachable: only the target-present arm is seeded, so a leak here
@@ -47,7 +47,7 @@ describe("stageSkill", () => {
     const parent = mkdtempSync(join(tmpdir(), "skillval-ws-"));
     dirs.push(parent);
 
-    expect(readdirSync(stageSkill(parent, "x", source).target)).toContain("reference.md");
+    expect(readdirSync(stageSkill(parent, "x", source, parent).target)).toContain("reference.md");
   });
 });
 

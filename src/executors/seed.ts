@@ -12,12 +12,13 @@ import type { Dirent } from "node:fs";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { isAlias, isMap, isPair, parseDocument, visit } from "yaml";
 import { SKIPPED_DIRECTORIES, sha256 } from "../utils.js";
 import { ExecutorInfraError } from "./spawn.js";
@@ -261,9 +262,14 @@ export function stagedRelativePaths(skillDirectory: string): string[] {
   return paths;
 }
 
-export function stageSkill(parent: string, name: string, skillDirectory: string): StagedSkill {
+export function stageSkill(
+  parent: string,
+  name: string,
+  skillDirectory: string,
+  workspace: string,
+): StagedSkill {
   try {
-    return stage(parent, name, skillDirectory);
+    return stage(parent, name, skillDirectory, workspace);
   } catch (error) {
     // Staging happens BEFORE the model runs, so nothing about the skill has been tested when it
     // fails. Permissions, ENOSPC, a dangling symlink or a special file would otherwise surface as
@@ -277,8 +283,39 @@ export function stageSkill(parent: string, name: string, skillDirectory: string)
   }
 }
 
-function stage(parent: string, name: string, skillDirectory: string): StagedSkill {
+/**
+ * Rejects a staging destination reachable only through a symlinked ancestor.
+ *
+ * Checked from the workspace down, and only over components that already exist - the rest are
+ * created by this call and cannot be links.
+ */
+function rejectLinkedAncestors(workspace: string, target: string): void {
+  const parts = relative(workspace, target)
+    .split(sep)
+    .filter((part) => part !== "");
+  let walked = workspace;
+  for (const part of parts) {
+    walked = join(walked, part);
+    const stats = lstatSync(walked, { throwIfNoEntry: false });
+    if (stats === undefined) return;
+    if (stats.isSymbolicLink()) throw symlinkRejected(walked);
+  }
+}
+
+function stage(
+  parent: string,
+  name: string,
+  skillDirectory: string,
+  workspace: string,
+): StagedSkill {
   const target = join(parent, name);
+  // The provider root is a fixture-writable path, so every component from the workspace down to it
+  // must be a real directory before anything is written. A fixture-planted `.claude -> elsewhere`
+  // would otherwise send staging through the link: the files land under the link's TARGET while the
+  // manifest records the pathname, subtraction finds nothing to remove at that pathname, and the
+  // grader reads the skill's own SKILL.md as model output. An external target writes outside the
+  // workspace entirely.
+  rejectLinkedAncestors(workspace, target);
   const created: StagedFile[] = [];
   const directories: string[] = [];
   if (!existsSync(target)) directories.push(target);

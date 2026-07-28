@@ -82,10 +82,19 @@ import { sha256 } from "./utils.js";
 //     skill it was only asked to read.
 // 33: the graded tree is a FAITHFUL copy with staged files removed, standing at the workspace's own
 //     path. The previous selective copy was lossy in exactly the ways that manufacture false
+// 34: the graded tree is a faithful copy with staged input subtracted through a no-follow walk,
+//     and internal links are resolved component-wise - both change what a grader sees.
+// 35: the agent runs as its own process group and is reaped, so a writer the model backgrounded
+//     can no longer mutate the tree after the turn. Pre-35 verdicts could have been graded
+//     against a tree that writer had already touched.
+// 36: containment actually works. Under 35 a leaked writer still held skillval's stdout pipe, so
+//     the backstop ran only AFTER the mutation and the trial stalled meanwhile; and the wrapper's
+//     control channel was readable by the agent, which could discard its own gradeable trial. A
+//     verdict recorded under 35 may have been graded against a tree a post-turn writer touched.
 //     failures - a model's own empty directory vanished, and a symlink a fixture was told to create
 //     was erased - and grading under a different prefix broke generated files carrying absolute
 //     paths. Escaping links are dropped, internal ones kept, absolute internal ones repointed.
-export const RUNNER_VERSION = 33;
+export const RUNNER_VERSION = 36;
 
 export interface ArmCacheIdentity {
   readonly arm: RuntimeArm;

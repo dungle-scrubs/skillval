@@ -112,3 +112,57 @@ describe("seeded skills are never graded as model output", () => {
     expect(unfiltered.find((check) => check.name === "must_not_match")?.pass).toBe(false);
   });
 });
+
+describe("generation cases that produced nothing", () => {
+  it("reports what the agent said instead of an empty got:", () => {
+    // `got: ` with nothing after it cannot distinguish the three things it might mean: the model
+    // wrote nothing, it wrote somewhere the walk does not reach, or everything it wrote was
+    // excluded as staged input. That ambiguity stalled a real diagnosis through three prompt
+    // shapes - a case where both arms wrote nothing while the turn completed cleanly. The agent's
+    // own words are the evidence of which case it is, and the first run carrying them named the
+    // cause outright: writes were being denied because the model targeted a provider path.
+    const workspace = mkdtempSync(join(tmpdir(), "skillval-grade-empty-"));
+    directories.push(workspace);
+
+    const checks = gradeTrial(
+      {
+        assert: { must_match: ["name: standards-yaml"] },
+        id: "case",
+        mode: "generation",
+        prompt: "prompt",
+      } as EvalCase,
+      "solo",
+      trace("tool permissions are blocking writes in this sandbox"),
+      workspace,
+    );
+
+    const check = checks.find((candidate) => candidate.name === "must_match");
+    expect(check?.pass).toBe(false);
+    expect(check?.detail).toContain("no files produced");
+    expect(check?.detail).toContain("tool permissions are blocking writes");
+  });
+
+  it("still shows the produced file when there is one", () => {
+    // The diagnostic must not swallow the normal case: when a file exists, its text is the
+    // evidence, not the agent's narration about it.
+    const workspace = mkdtempSync(join(tmpdir(), "skillval-grade-full-"));
+    directories.push(workspace);
+    writeFileSync(join(workspace, "impl.ts"), "export const answer = 1;\n");
+
+    const checks = gradeTrial(
+      {
+        assert: { must_match: ["nothing-matches-this"] },
+        id: "case",
+        mode: "generation",
+        prompt: "prompt",
+      } as EvalCase,
+      "solo",
+      trace("I wrote the file"),
+      workspace,
+    );
+
+    const check = checks.find((candidate) => candidate.name === "must_match");
+    expect(check?.detail).toContain("export const answer = 1;");
+    expect(check?.detail).not.toContain("no files produced");
+  });
+});
