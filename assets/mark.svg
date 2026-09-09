@@ -1,0 +1,25 @@
+<!--
+  github-brandkit mark template.
+
+  Square. Solid colour ground with a Lucide glyph in white.
+  viewBox 1024 so the same source rasterizes crisply to 512 and 1024.
+
+  Tokens filled by render.ts:
+    #4F46E5         ground fill (hand-assigned per project)
+    #FFFFFF    icon stroke (#FFFFFF by default)
+    228    corner radius
+    234     icon group translate X (centred)
+    234     icon group translate Y (centred)
+    23.167 icon group scale (iconPx / 24)
+    <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+  <path d="m9 14 2 2 4-4" />     Lucide inner SVG nodes (paths/circles), stroke inherited
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="#4F46E5"/>
+  <g transform="translate(234 234) scale(23.167)"
+     fill="none" stroke="#FFFFFF" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+  <path d="m9 14 2 2 4-4" /></g>
+</svg>
