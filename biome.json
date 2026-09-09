@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!src/generated/report-assets.ts", "!report-ui/styles.css"]
+    "includes": ["**", "!assets", "!src/generated/report-assets.ts", "!report-ui/styles.css"]
   },
   "formatter": {
     "enabled": true,
